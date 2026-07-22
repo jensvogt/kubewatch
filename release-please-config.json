@@ -8,12 +8,7 @@
     "^Merge pull request",
     "^chore\\(ci\\):"
   ],
-  "version-file": [
-    {
-      "path": "version.txt",
-      "regex": "^(.*)$"
-    }
-  ],
+  "version-file": "version.txt",
   "changelog-sections": [
     { "type": "feat", "section": "New Features", "hidden": false },
     { "type": "fix", "section": "Bug Fixes", "hidden": false },
@@ -32,6 +27,7 @@
       "changelog-path": "CHANGELOG.md",
       "include-v-in-tag": false,
       "release-type": "simple",
+      "version-file": "version.txt",
       "bump-minor-pre-major": false,
       "bump-patch-for-minor-pre-major": false,
       "draft": false,
