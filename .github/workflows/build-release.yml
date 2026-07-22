@@ -1,0 +1,352 @@
+name: Release + Build + Installer (Windows / macOS / Linux)
+
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+env:
+  QT_VERSION: "6.10.1"
+  APP_NAME: "kubewatch"
+  INSTALLER_ID: "de.jensvogt.kubewatch"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Create Release PR / Tag
+    runs-on: ubuntu-latest
+
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.strip_tag.outputs.clean_tag }}
+
+    steps:
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Strip leading 'v' from tag
+        id: strip_tag
+        run: |
+          TAG="${{ steps.release.outputs.tag_name }}"
+          CLEAN="${TAG#v}"
+          echo "clean_tag=$CLEAN" >> $GITHUB_OUTPUT
+
+  build-windows:
+    name: Build & Package (Windows)
+    runs-on: windows-latest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    env:
+      QT_DIR: "${{ github.workspace }}\\Qt"
+      BUILD_DIR: "${{ github.workspace }}\\build-windows"
+      INSTALLER_DIR: "${{ github.workspace }}\\installer"
+      SEMVER: "${{ needs.release-please.outputs.tag_name }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Python & aqtinstall
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -U aqtinstall
+
+      - name: Install Qt and Qt Installer Framework (IFW)
+        shell: powershell
+        run: |
+          python -m aqt install-qt windows desktop $env:QT_VERSION win64_msvc2022_64 --outputdir $env:QT_DIR --modules qtsvg
+          python -m aqt install-tool windows desktop tools_ifw --outputdir $env:QT_DIR
+
+      - name: Configure CMake (Windows)
+        shell: powershell
+        run: |
+          $qtPrefix = Join-Path $env:QT_DIR "$env:QT_VERSION\msvc2022_64"
+          if (!(Test-Path $qtPrefix)) { Write-Error "Qt prefix not found: $qtPrefix"; exit 1 }
+          if (!(Test-Path $env:BUILD_DIR)) { New-Item -ItemType Directory -Path $env:BUILD_DIR | Out-Null }
+          cmake -S . -B $env:BUILD_DIR -G "Ninja" -DQt6_DIR="$env:QT_DIR\$env:QT_VERSION\msvc2022_64\lib\cmake\Qt6" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (Windows, parallel)
+        shell: powershell
+        run: |
+          cmake --build $env:BUILD_DIR --config Release --parallel
+
+      - name: Deploy Qt runtime into installer data folder
+        shell: powershell
+        run: |
+          $exe = Join-Path $env:BUILD_DIR "$env:APP_NAME.exe"
+          $dataDir = Join-Path $env:INSTALLER_DIR "packages\$env:INSTALLER_ID\data"
+          New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+          & "$env:QT_DIR\$env:QT_VERSION\msvc2022_64\bin\windeployqt6.exe" $exe --dir $dataDir
+          Copy-Item $exe $dataDir
+          Copy-Item dist\etc\kubewatch.json $dataDir
+
+      - name: Build Qt Installer Framework installer (binarycreator)
+        shell: pwsh
+        run: |
+          $ifwRoot = Get-ChildItem "$env:QT_DIR\Tools\QtInstallerFramework" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $ifwRoot) { Write-Error "IFW not found"; exit 1 }
+          $ifwBin = Join-Path $ifwRoot.FullName "bin"
+          $env:PATH = "$ifwBin;$env:PATH"
+          binarycreator -c "$env:INSTALLER_DIR\config\config.xml" -p "$env:INSTALLER_DIR\packages" "$env:INSTALLER_DIR\$env:APP_NAME-$env:SEMVER-windows.exe"
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: installer/${{ env.APP_NAME }}-${{ env.SEMVER }}-windows.exe
+
+  build-macos:
+    name: Build & Package (macOS)
+    runs-on: macos-latest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    env:
+      BUILD_DIR: "${{ github.workspace }}/build-macos"
+      SEMVER: "${{ needs.release-please.outputs.tag_name }}"
+      APP_NAME: "kubewatch"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt via aqtinstall
+        shell: bash
+        run: |
+          python3 -m venv ~/venv
+          source ~/venv/bin/activate
+          python3 -m pip install --upgrade pip
+          python3 -m pip install aqtinstall
+          python3 -m aqt install-qt mac desktop ${{ env.QT_VERSION }} clang_64 --outputdir "$HOME/Qt" --modules qtsvg
+
+      - name: Configure (macOS)
+        shell: bash
+        run: |
+          mkdir -p $BUILD_DIR
+          cmake -S . -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release -DQt6_DIR="$HOME/Qt/${{ env.QT_VERSION }}/macos/lib/cmake/Qt6"
+
+      - name: Build (macOS)
+        shell: bash
+        run: |
+          cmake --build $BUILD_DIR --config Release --parallel $(sysctl -n hw.logicalcpu)
+
+      - name: macdeployqt + create DMG
+        shell: bash
+        run: |
+          APP_BUNDLE="$BUILD_DIR/${APP_NAME}.app"
+          if [ ! -d "$APP_BUNDLE" ]; then
+            echo "App bundle not found at $APP_BUNDLE"
+            ls -R "$BUILD_DIR"
+            exit 1
+          fi
+          cp dist/etc/kubewatch.json "$APP_BUNDLE/Contents/MacOS/kubewatch.json"
+          MACDEPLOYQT="$(find ${HOME}/Qt -type f -name macdeployqt | head -n 1)"
+          "$MACDEPLOYQT" "$APP_BUNDLE" -always-overwrite
+          codesign --force --deep --entitlements dist/macos/entitlements.plist --sign - "$APP_BUNDLE"
+          mkdir -p dist
+          DMG_NAME="${APP_NAME}-${SEMVER}-macos.dmg"
+          hdiutil create "dist/$DMG_NAME" -volname "${APP_NAME}" -srcfolder "$APP_BUNDLE" -ov -format UDZO
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos
+          path: dist/${{ env.APP_NAME }}-${{ env.SEMVER }}-macos.dmg
+
+  build-linux-deb:
+    name: Build & Package (Linux Debian package)
+    runs-on: ubuntu-22.04
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    env:
+      BUILD_DIR: "${{ github.workspace }}/build-linux"
+      SEMVER: "${{ needs.release-please.outputs.tag_name }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake wget tar libfreetype6-dev libfontconfig1-dev libglib2.0-dev \
+            ninja-build ruby ruby-dev libx11-dev libxext-dev libxrender-dev
+          sudo gem install --no-document fpm
+
+      - name: Install Qt via install-qt-action
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qtsvg
+          install-deps: true
+
+      - name: Configure (Linux)
+        shell: bash
+        run: |
+          mkdir -p $BUILD_DIR
+          cmake -S . -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (Linux)
+        shell: bash
+        run: |
+          cmake --build $BUILD_DIR --parallel $(nproc)
+
+      - name: Prepare package structure
+        run: |
+          PACKAGE_DIR=package
+          echo "PACKAGE_DIR=$PACKAGE_DIR" >> $GITHUB_ENV
+
+          mkdir -p $PACKAGE_DIR/usr/local/$APP_NAME/bin
+          mkdir -p $PACKAGE_DIR/usr/local/$APP_NAME/etc
+          mkdir -p $PACKAGE_DIR/usr/local/$APP_NAME/lib
+          mkdir -p $PACKAGE_DIR/usr/local/$APP_NAME/plugins
+          mkdir -p $PACKAGE_DIR/usr/share/applications
+
+          cp $BUILD_DIR/$APP_NAME $PACKAGE_DIR/usr/local/$APP_NAME/bin/
+          cp dist/etc/kubewatch.json $PACKAGE_DIR/usr/local/$APP_NAME/etc/kubewatch.json
+          cp -r $QT_ROOT_DIR/lib/* $PACKAGE_DIR/usr/local/$APP_NAME/lib/
+          cp -r $QT_ROOT_DIR/plugins/platforms $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
+          cp -r $QT_ROOT_DIR/plugins/iconengines $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
+          cp dist/etc/kubewatch.desktop $PACKAGE_DIR/usr/share/applications/
+
+          cat << EOF > $PACKAGE_DIR/usr/local/$APP_NAME/bin/qt.conf
+          [Paths]
+          Prefix = ..
+          EOF
+
+      - name: Build DEB with fpm
+        run: |
+          fpm -s dir -t deb --name "${APP_NAME}" --version "${SEMVER}" --architecture amd64 --package "${APP_NAME}-${SEMVER}-amd64.deb" -C "$PACKAGE_DIR" usr
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-package-linux
+          path: ${{ env.APP_NAME }}-${{ env.SEMVER }}-amd64.deb
+
+  build-linux-rpm:
+    name: Build & Package (Linux RPM package)
+    runs-on: ubuntu-latest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    env:
+      APP_NAME: kubewatch
+      BUILD_DIR: "${{ github.workspace }}/build-linux"
+      SEMVER: "${{ needs.release-please.outputs.tag_name }}"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake ninja-build ruby ruby-dev
+          sudo gem install --no-document fpm
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qtsvg
+          install-deps: true
+
+      - name: Configure & Build
+        run: |
+          mkdir -p $BUILD_DIR
+          cmake -S . -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release
+          cmake --build $BUILD_DIR --parallel $(nproc)
+
+      - name: Prepare Linux package folder
+        run: |
+          PACKAGE_DIR=package
+          echo "PACKAGE_DIR=$PACKAGE_DIR" >> $GITHUB_ENV
+
+          mkdir -p $PACKAGE_DIR/usr/local/$APP_NAME/bin
+          mkdir -p $PACKAGE_DIR/usr/local/$APP_NAME/etc
+          mkdir -p $PACKAGE_DIR/usr/local/$APP_NAME/lib
+          mkdir -p $PACKAGE_DIR/usr/local/$APP_NAME/plugins
+
+          cp $BUILD_DIR/$APP_NAME $PACKAGE_DIR/usr/local/$APP_NAME/bin/
+          cp dist/etc/kubewatch.json $PACKAGE_DIR/usr/local/$APP_NAME/etc/kubewatch.json
+          cp -r $QT_ROOT_DIR/lib/* $PACKAGE_DIR/usr/local/$APP_NAME/lib/
+          cp -r $QT_ROOT_DIR/plugins/platforms $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
+          cp -r $QT_ROOT_DIR/plugins/iconengines $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
+
+          cat << EOF > $PACKAGE_DIR/usr/local/$APP_NAME/bin/qt.conf
+          [Paths]
+          Prefix = ..
+          EOF
+
+      - name: Build RPM with fpm
+        run: |
+          fpm -s dir -t rpm --name "${APP_NAME}" --version "${SEMVER}" --architecture amd64 --package "${APP_NAME}-${SEMVER}-amd64.rpm" -C "$PACKAGE_DIR" usr/local/$APP_NAME
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-package-linux
+          path: ${{ env.APP_NAME }}-${{ env.SEMVER }}-amd64.rpm
+
+  publish:
+    name: Publish Release & Attach Installers
+    runs-on: ubuntu-latest
+    needs: [ release-please, build-windows, build-macos, build-linux-rpm, build-linux-deb ]
+    env:
+      SEMVER: "${{ needs.release-please.outputs.tag_name }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-windows
+          path: artifacts/windows
+
+      - name: Download macOS installer
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-macos
+          path: artifacts/macos
+
+      - name: Download Linux Debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-package-linux
+          path: artifacts/linux
+
+      - name: Download Linux RPM package
+        uses: actions/download-artifact@v4
+        with:
+          name: rpm-package-linux
+          path: artifacts/linux
+
+      - name: Create GitHub Release (attach installers)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/windows/*.exe
+            artifacts/macos/*.dmg
+            artifacts/linux/*.deb
+            artifacts/linux/*.rpm
+          name: Release ${{ env.SEMVER }}
+          tag_name: ${{ env.SEMVER }}
+          body: "Automated release for ${{ env.SEMVER }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

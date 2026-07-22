@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=KubeWatch
+Comment=Kubernetes cluster viewer
+Exec=kubewatch
+Icon=kubewatch
+Terminal=false
+Categories=Utility;

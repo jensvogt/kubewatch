@@ -29,7 +29,7 @@ find_package(Qt6 COMPONENTS
         Svg
         REQUIRED)
 
-add_executable(kubewatch WIN32
+add_executable(kubewatch WIN32 MACOSX_BUNDLE
         main.cpp
         resources/awsmock-qt-ui.qrc
         include/components/PageableTable.h
