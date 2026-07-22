@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/jensvogt/kubewatch/compare/1.1.1...1.1.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **ci:** drop invalid qtsvg add-on module from Qt installs ([00fc066](https://github.com/jensvogt/kubewatch/commit/00fc066699253503513c1df273083f605bbbd939))
+
 ## [1.1.1](https://github.com/jensvogt/kubewatch/compare/1.1.0...1.1.1) (2026-07-22)
 
 
