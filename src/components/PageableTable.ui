@@ -36,6 +36,9 @@
      </item>
      <item>
       <widget class="QPushButton" name="prefixClearButton">
+       <property name="toolTip">
+        <string>Refresh the table</string>
+       </property>
        <property name="text">
         <string>PushButton</string>
        </property>
@@ -59,9 +62,6 @@
          <height>0</height>
         </size>
        </property>
-       <property name="text">
-        <string>TextLabel</string>
-       </property>
       </widget>
      </item>
      <item>
@@ -72,9 +72,6 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
-       <property name="text">
-        <string>TextLabel</string>
-       </property>
       </widget>
      </item>
      <item>
@@ -84,6 +81,9 @@
          <width>100</width>
          <height>16777215</height>
         </size>
+       </property>
+       <property name="toolTip">
+        <string>Page size</string>
        </property>
       </widget>
      </item>
@@ -96,6 +96,9 @@
      </item>
      <item>
       <widget class="QPushButton" name="startButton">
+       <property name="toolTip">
+        <string>Go to the first page of the table</string>
+       </property>
        <property name="text">
         <string>start</string>
        </property>
@@ -103,6 +106,9 @@
      </item>
      <item>
       <widget class="QPushButton" name="previousButton">
+       <property name="toolTip">
+        <string>Go to the previous page of the table</string>
+       </property>
        <property name="text">
         <string>prev</string>
        </property>
@@ -110,6 +116,9 @@
      </item>
      <item>
       <widget class="QPushButton" name="nextButton">
+       <property name="toolTip">
+        <string>Go to the next page of the table</string>
+       </property>
        <property name="text">
         <string>next</string>
        </property>
@@ -117,6 +126,9 @@
      </item>
      <item>
       <widget class="QPushButton" name="endButton">
+       <property name="toolTip">
+        <string>Go to the last page of the table</string>
+       </property>
        <property name="text">
         <string>end</string>
        </property>
