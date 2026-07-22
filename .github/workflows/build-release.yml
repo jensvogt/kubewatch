@@ -61,14 +61,20 @@ jobs:
       - name: Install Python & aqtinstall
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install -U aqtinstall
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install Qt and Qt Installer Framework (IFW)
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
           python -m aqt install-qt windows desktop $env:QT_VERSION win64_msvc2022_64 --outputdir $env:QT_DIR --modules qtsvg
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m aqt install-tool windows desktop tools_ifw --outputdir $env:QT_DIR
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Configure CMake (Windows)
         shell: powershell
@@ -77,30 +83,36 @@ jobs:
           if (!(Test-Path $qtPrefix)) { Write-Error "Qt prefix not found: $qtPrefix"; exit 1 }
           if (!(Test-Path $env:BUILD_DIR)) { New-Item -ItemType Directory -Path $env:BUILD_DIR | Out-Null }
           cmake -S . -B $env:BUILD_DIR -G "Ninja" -DQt6_DIR="$env:QT_DIR\$env:QT_VERSION\msvc2022_64\lib\cmake\Qt6" -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build (Windows, parallel)
         shell: powershell
         run: |
           cmake --build $env:BUILD_DIR --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Deploy Qt runtime into installer data folder
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
           $exe = Join-Path $env:BUILD_DIR "$env:APP_NAME.exe"
           $dataDir = Join-Path $env:INSTALLER_DIR "packages\$env:INSTALLER_ID\data"
           New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
           & "$env:QT_DIR\$env:QT_VERSION\msvc2022_64\bin\windeployqt6.exe" $exe --dir $dataDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item $exe $dataDir
           Copy-Item dist\etc\kubewatch.json $dataDir
 
       - name: Build Qt Installer Framework installer (binarycreator)
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $ifwRoot = Get-ChildItem "$env:QT_DIR\Tools\QtInstallerFramework" -Directory | Sort-Object Name -Descending | Select-Object -First 1
           if (-not $ifwRoot) { Write-Error "IFW not found"; exit 1 }
           $ifwBin = Join-Path $ifwRoot.FullName "bin"
           $env:PATH = "$ifwBin;$env:PATH"
           binarycreator -c "$env:INSTALLER_DIR\config\config.xml" -p "$env:INSTALLER_DIR\packages" "$env:INSTALLER_DIR\$env:APP_NAME-$env:SEMVER-windows.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
