@@ -527,17 +527,15 @@ namespace {
             {
                 const QSignalBlocker blocker(contextBox_);
                 loadContexts();
-                const QString savedContext = Configuration::instance().GetValue<QString>("ui.last-context", QString());
-                if (!savedContext.isEmpty()) {
-                    const int idx = contextBox_->findText(savedContext);
-                    if (idx >= 0) contextBox_->setCurrentIndex(idx);
+                if (const auto savedContext = Configuration::instance().GetValue<QString>("ui.last-context", QString()); !savedContext.isEmpty()) {
+                    if (const int idx = contextBox_->findText(savedContext); idx >= 0) contextBox_->setCurrentIndex(idx);
                 }
             }
 
             {
                 const QSignalBlocker blocker(namespaceBox_);
                 loadNamespaces();
-                const QString savedNamespace =
+                const auto savedNamespace =
                     Configuration::instance().GetValue<QString>("ui.last-namespace", QString());
                 if (!savedNamespace.isEmpty()) {
                     const int idx = namespaceBox_->findText(savedNamespace);
@@ -545,7 +543,7 @@ namespace {
                 }
             }
 
-            const QString savedNavItem = Configuration::instance().GetValue<QString>("ui.last-nav-item", QString());
+            const auto savedNavItem = Configuration::instance().GetValue<QString>("ui.last-nav-item", QString());
             QTreeWidgetItem* restoredItem = savedNavItem.isEmpty() ? nullptr : findLeafByLabel(savedNavItem);
             tree_->setCurrentItem(restoredItem ? restoredItem : nodesItem_);
         }
@@ -675,8 +673,7 @@ namespace {
             contextBox_->addItems(result.split('\n', Qt::SkipEmptyParts));
 
             const QString current = runKubectl({"--kubeconfig", kKubeconfig, "config", "current-context"}).trimmed();
-            const int index = contextBox_->findText(current);
-            if (index >= 0) {
+            if (const int index = contextBox_->findText(current); index >= 0) {
                 contextBox_->setCurrentIndex(index);
             }
         }
@@ -686,18 +683,18 @@ namespace {
             namespaceBox_->addItem("All namespaces");
             QStringList args = baseArgs();
             args << "get" << "namespaces" << "-o" << "json";
-            for (const QJsonValue &item: fetchItems(args)) {
+            for (const auto &item: fetchItems(args)) {
                 namespaceBox_->addItem(item.toObject()["metadata"].toObject()["name"].toString());
             }
         }
 
-        void onContextChanged() {
+        void onContextChanged() const {
             Configuration::instance().SetValue("ui.last-context", contextBox_->currentText());
             loadNamespaces();
             refreshCurrentPage();
         }
 
-        void onNamespaceChanged() {
+        void onNamespaceChanged() const {
             Configuration::instance().SetValue("ui.last-namespace", namespaceBox_->currentText());
             refreshCurrentPage();
         }
@@ -713,7 +710,7 @@ namespace {
             return nullptr;
         }
 
-        void onTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *) {
+        void onTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *) const {
             if (!current) return;
             const QVariant data = current->data(0, Qt::UserRole);
             if (!data.isValid()) {
@@ -726,7 +723,7 @@ namespace {
             loadPage(pageIndex);
         }
 
-        void refreshCurrentPage() {
+        void refreshCurrentPage() const {
             const QTreeWidgetItem *current = tree_->currentItem();
             if (!current) return;
             const QVariant data = current->data(0, Qt::UserRole);
@@ -734,21 +731,21 @@ namespace {
             loadPage(data.toInt());
         }
 
-        void loadPage(const int pageIndex) {
-            const ResourceSpec &spec = specs_[pageIndex];
+        void loadPage(const int pageIndex) const {
+            const auto &[kind, kubectlName, namespaceColumn] = specs_[pageIndex];
             auto *table = qobject_cast<PageableTable *>(pages_->widget(pageIndex));
-            switch (spec.kind) {
+            switch (kind) {
                 case PageKind::Generic:
-                    fetchGeneric(table, spec.kubectlName, spec.namespaceColumn);
+                    fetchGeneric(table, kubectlName, namespaceColumn);
                     break;
                 case PageKind::Pods:
-                    fetchPods(table, spec.namespaceColumn);
+                    fetchPods(table, namespaceColumn);
                     break;
                 case PageKind::Jobs:
-                    fetchJobs(table, spec.namespaceColumn);
+                    fetchJobs(table, namespaceColumn);
                     break;
                 case PageKind::Services:
-                    fetchServices(table, spec.namespaceColumn);
+                    fetchServices(table, namespaceColumn);
                     break;
                 case PageKind::Nodes:
                     fetchNodes(table);
