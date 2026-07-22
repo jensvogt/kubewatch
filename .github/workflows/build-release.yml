@@ -71,7 +71,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          python -m aqt install-qt windows desktop $env:QT_VERSION win64_msvc2022_64 --outputdir $env:QT_DIR --modules qtsvg
+          python -m aqt install-qt windows desktop $env:QT_VERSION win64_msvc2022_64 --outputdir $env:QT_DIR
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m aqt install-tool windows desktop tools_ifw --outputdir $env:QT_DIR
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -142,7 +142,7 @@ jobs:
           source ~/venv/bin/activate
           python3 -m pip install --upgrade pip
           python3 -m pip install aqtinstall
-          python3 -m aqt install-qt mac desktop ${{ env.QT_VERSION }} clang_64 --outputdir "$HOME/Qt" --modules qtsvg
+          python3 -m aqt install-qt mac desktop ${{ env.QT_VERSION }} clang_64 --outputdir "$HOME/Qt"
 
       - name: Configure (macOS)
         shell: bash
@@ -203,7 +203,6 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          modules: qtsvg
           install-deps: true
 
       - name: Configure (Linux)
@@ -273,7 +272,6 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          modules: qtsvg
           install-deps: true
 
       - name: Configure & Build
