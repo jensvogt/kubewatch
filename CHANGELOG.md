@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.3](https://github.com/jensvogt/kubewatch/compare/1.1.2...1.1.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* lower cmake_minimum_required to a realistic version ([1388769](https://github.com/jensvogt/kubewatch/commit/138876974b0548be955762702e3189f059ed40f5))
+
 ## [1.1.2](https://github.com/jensvogt/kubewatch/compare/1.1.1...1.1.2) (2026-07-22)
 
 
