@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/jensvogt/kubewatch/compare/1.1.0...1.1.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **ci:** make Windows PowerShell steps fail fast on tool errors ([69e2a24](https://github.com/jensvogt/kubewatch/commit/69e2a24f9309645845d4843a21a9590e5fbe8c38))
+
 ## [1.1.0](https://github.com/jensvogt/kubewatch/compare/1.0.0...1.1.0) (2026-07-22)
 
 
