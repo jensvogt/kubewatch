@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Installer>
+    <Name>KubeWatch</Name>
+    <Version>@VERSION_STRING@</Version>
+    <Title>KubeWatch Installer</Title>
+    <Publisher>Jens Vogt</Publisher>
+    <StartMenuDir>kubewatch</StartMenuDir>
+    <TargetDir>@ApplicationsDir@/kubewatch</TargetDir>
+</Installer>

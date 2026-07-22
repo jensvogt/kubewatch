@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Package>
+    <DisplayName>KubeWatch</DisplayName>
+    <Description>KubeWatch Kubernetes cluster viewer</Description>
+    <Version>@VERSION_STRING@</Version>
+    <ReleaseDate>@RELEASE_DATE@</ReleaseDate>
+    <Default>true</Default>
+    <Script>installscript.qs</Script>
+</Package>

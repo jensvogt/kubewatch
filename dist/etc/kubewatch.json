@@ -1,0 +1,10 @@
+{
+  "ui": {
+    "busy-indicator-delay-ms": 500,
+    "last-context": "arn:aws:eks:eu-central-1:012096702153:cluster/pim-prod-eks",
+    "last-namespace": "pim-prod",
+    "last-nav-item": "Jobs",
+    "page-size": 25,
+    "style-type": "dark"
+  }
+}

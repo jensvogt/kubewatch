@@ -1,0 +1,142 @@
+QWidget {
+    background-color: #ffffff;
+    color: #dcdcdc;
+}
+
+/* ============================================================================= */
+/* PushButtons                                                                   */
+/* ============================================================================= */
+QPushButton {
+    background-color: #3c3f41;
+    border: 1px solid #5c5c5c;
+    padding: 2px;
+}
+
+QPushButton:hover {
+    background-color: #505354;
+}
+
+QDialogButtonBox QPushButton {
+    min-width: 80px;
+}
+
+/* ============================================================================= */
+/* Text fields                                                                   */
+/* ============================================================================= */
+QLineEdit, QTextEdit, QPlainTextEdit {
+    background-color: #ffffff;
+    border: 1px solid #767676;
+}
+
+/* ============================================================================= */
+/* Menu                                                                          */
+/* ============================================================================= */
+QMenuBar, QMenu {
+    background-color: #ffffff;
+}
+
+QMenuBar::selected, QMenu::selected {
+    background-color: #3478f6;
+}
+
+QMenu::item:selected {
+    background-color: #3478f6;
+}
+
+QMenuBar::item:selected {
+    background-color: #3478f6;
+}
+
+QMenu::item:disabled {
+    color: #afafaf;
+}
+
+/* ============================================================================= */
+/* Scrollbar horizontal                                                          */
+/* ============================================================================= */
+QScrollBar::handle:horizontal {
+    background: #666;
+    min-width: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar:horizontal {
+    height: 12px;
+    background: #ffffff;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    background: #444;
+    height: 0px;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+
+/* ============================================================================= */
+/* Scrollbar horizontal                                                          */
+/* ============================================================================= */
+QScrollBar::handle:vertical {
+    background: #666;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar:vertical {
+    width: 12px;
+    background: #ffffff;
+    margin: 0px;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    background: #444;
+    height: 0px;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+/* ============================================================================= */
+/* Table view                                                                    */
+/* ============================================================================= */
+QTableView::item {
+    padding: 6px;
+}
+
+QTableView::item:selected {
+    background: #3478f6;
+    color: white;
+}
+
+/* ============================================================================= */
+/* List view                                                                     */
+/* ============================================================================= */
+QListWidget::item:selected {
+    background: #3478f6;
+    color: white;
+}
+
+QListView::item:selected {
+    background: #3478f6;
+    color: white;
+}
+
+/* ============================================================================= */
+/* Chart                                                                         */
+/* ============================================================================= */
+QChart {
+    background-color: #3c3f41;
+    border: 1px solid #5c5c5c;
+}
+
+/* ============================================================================= */
+/* Checkbox                                                                      */
+/* ============================================================================= */
+QCheckBox {
+    background-color: #ffffff;
+    border: 1px solid #5c5c5c;
+}
