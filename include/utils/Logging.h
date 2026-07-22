@@ -137,6 +137,12 @@ inline int ToValueLogLevel(const QtMsgType &logLevel) {
 }
 
 inline void myCustomMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
+    // Skip Qt's own internal diagnostic noise (network/TLS/QPA/SVG/etc. all log under a
+    // "qt.*" category by convention) -- not interesting, only our own app messages are.
+    if (context.category && QString(context.category).startsWith("qt.")) {
+        return;
+    }
+
     // Format the string with a timestamp
     const QString timestamp = DateTimeUtils::GetLogDateTimeFormat(QDateTime::currentDateTime());
 

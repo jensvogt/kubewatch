@@ -6,5 +6,18 @@
     "last-nav-item": "Jobs",
     "page-size": 25,
     "style-type": "dark"
+  },
+  "onelogin": {
+    "subDomain": "",
+    "clientId": "",
+    "clientSecret": "",
+    "deviceId": 0,
+    "app-id": {
+      "int": 0,
+      "prod": 0
+    }
+  },
+  "aws": {
+    "session-duration-seconds": 14400
   }
 }

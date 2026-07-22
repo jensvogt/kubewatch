@@ -27,6 +27,7 @@ find_package(Qt6 COMPONENTS
         Gui
         Widgets
         Svg
+        Network
         REQUIRED)
 
 add_executable(kubewatch WIN32 MACOSX_BUNDLE
@@ -42,6 +43,9 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         include/utils/PrefixFilterModel.h
         src/utils/PrefixFilterModel.cpp
         include/utils/EventBus.h
+        include/utils/Logging.h
+        include/onelogin/OneLoginAuth.h
+        src/onelogin/OneLoginAuth.cpp
 )
 target_include_directories(kubewatch PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -51,6 +55,7 @@ target_link_libraries(kubewatch
         Qt::Gui
         Qt::Widgets
         Qt::Svg
+        Qt::Network
 )
 
 if (WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -86,7 +91,16 @@ if (WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
                 "${QT_INSTALL_PATH}/plugins/iconengines/qsvgicon${DEBUG_SUFFIX}.dll"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugins/iconengines/")
     endif ()
-    foreach (QT_LIB Core Gui Widgets Svg)
+    if (EXISTS "${QT_INSTALL_PATH}/plugins/tls/qschannelbackend${DEBUG_SUFFIX}.dll")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugins/tls/")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy
+                "${QT_INSTALL_PATH}/plugins/tls/qschannelbackend${DEBUG_SUFFIX}.dll"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugins/tls/")
+    endif ()
+    foreach (QT_LIB Core Gui Widgets Svg Network)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy
                 "${QT_INSTALL_PATH}/bin/Qt6${QT_LIB}${DEBUG_SUFFIX}.dll"

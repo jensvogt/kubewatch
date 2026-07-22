@@ -1,6 +1,7 @@
 #include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialog>
@@ -20,6 +21,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QMap>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
@@ -27,6 +31,7 @@
 #include <QPalette>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QShortcut>
@@ -39,14 +44,18 @@
 #include <QTextCursor>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include <components/PageableTable.h>
+#include <onelogin/OneLoginAuth.h>
 #include <utils/Configuration.h>
+#include <utils/EventBus.h>
 #include <utils/IconUtils.h>
+#include <utils/Logging.h>
 
 #include <utility>
 #include <vector>
@@ -115,6 +124,11 @@ namespace {
 
     BusyOverlay *g_busyOverlay = nullptr;
 
+    // Session credentials from the most recent successful OneLogin login for whichever
+    // AWS account matches the currently selected kubectl context, if any. Injected into
+    // kubectl's process environment so its exec-based auth plugin picks them up.
+    AwsSessionCredentials g_activeAwsCredentials;
+
     // Number of busy scopes/calls currently in flight. The overlay is only actually
     // hidden once this drops back to zero, so a sequence of kubectl calls nested
     // inside an outer BusyGuard doesn't flicker hide/show between each call.
@@ -159,7 +173,15 @@ namespace {
     };
 
     KubectlResult runKubectlCommand(const QStringList &args, const QString &stdinData = QString()) {
+        logDebug << "kubectl" << args.join(' ');
         QProcess process;
+        if (g_activeAwsCredentials.isValid()) {
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            env.insert("AWS_ACCESS_KEY_ID", g_activeAwsCredentials.accessKeyId);
+            env.insert("AWS_SECRET_ACCESS_KEY", g_activeAwsCredentials.secretAccessKey);
+            env.insert("AWS_SESSION_TOKEN", g_activeAwsCredentials.sessionToken);
+            process.setProcessEnvironment(env);
+        }
         process.start("kubectl", args);
         if (!process.waitForStarted(5000)) {
             return {false, {}, "Failed to start kubectl"};
@@ -195,6 +217,9 @@ namespace {
         result.output = QString::fromLocal8Bit(process.readAllStandardOutput());
         result.error = QString::fromLocal8Bit(process.readAllStandardError());
         result.success = process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+        if (!result.success) {
+            logWarning << "kubectl failed:" << result.error;
+        }
         return result;
     }
 
@@ -210,7 +235,7 @@ namespace {
     QString computeAge(const QString &creationTimestamp) {
         const QDateTime created = QDateTime::fromString(creationTimestamp, Qt::ISODate);
         if (!created.isValid()) {
-            return QString();
+            return {};
         }
         const qint64 secs = created.secsTo(QDateTime::currentDateTimeUtc());
         if (secs < 60) return QString("%1s").arg(secs);
@@ -430,7 +455,7 @@ namespace {
         }
     }
 
-    enum class PageKind { Placeholder, Generic, Pods, Jobs, Services, Nodes, Namespaces, Settings };
+    enum class PageKind { Placeholder, Generic, Pods, Jobs, Services, Ingresses, Nodes, Namespaces, Settings };
 
     struct ResourceSpec {
         PageKind kind = PageKind::Placeholder;
@@ -493,6 +518,11 @@ namespace {
             namespaceBox_ = new QComboBox();
             toolbar->addWidget(namespaceBox_);
 
+            auto *loginAction = new QAction(IconUtils::GetIcon("connect"), "Login", this);
+            loginAction->setToolTip("Sign in via OneLogin");
+            connect(loginAction, &QAction::triggered, this, &MainWindow::showLoginDialog);
+            toolbar->addAction(loginAction);
+
             auto *spacer = new QWidget();
             spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
             toolbar->addWidget(spacer);
@@ -517,7 +547,58 @@ namespace {
 
             buildTree();
 
-            mainLayout->addWidget(splitter);
+            logWidget_ = new QListWidget();
+            logWidget_->setUniformItemSizes(true);
+            logWidget_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+            logWidget_->setDragEnabled(true);
+            QFont logFont("Courier New");
+            logFont.setStyleHint(QFont::Monospace);
+            logWidget_->setFont(logFont);
+
+            autoScrollLogsButton_ = new QToolButton();
+            autoScrollLogsButton_->setIcon(IconUtils::GetIcon("scroll"));
+            autoScrollLogsButton_->setCheckable(true);
+            autoScrollLogsButton_->setChecked(true);
+            autoScrollLogsButton_->setToolTip("Auto-scroll to bottom");
+
+            connect(&LogSignaler::instance(), &LogSignaler::newLog, this, [this](const QString &msg) {
+                logWidget_->addItem(msg);
+                if (logWidget_->count() > 5000) {
+                    delete logWidget_->takeItem(0);
+                }
+                if (autoScrollLogsButton_->isChecked()) {
+                    logWidget_->scrollToBottom();
+                }
+            });
+
+            auto *copyLogShortcut = new QShortcut(QKeySequence::Copy, logWidget_);
+            connect(copyLogShortcut, &QShortcut::activated, this, [this] {
+                QStringList lines;
+                for (const QListWidgetItem *item : logWidget_->selectedItems()) {
+                    lines << item->text();
+                }
+                if (!lines.isEmpty()) {
+                    QApplication::clipboard()->setText(lines.join('\n'));
+                }
+            });
+
+            auto *logContainer = new QWidget();
+            auto *logContainerLayout = new QVBoxLayout(logContainer);
+            logContainerLayout->setContentsMargins(0, 0, 0, 0);
+            auto *logToolbar = new QHBoxLayout();
+            logToolbar->addWidget(new QLabel("Log"));
+            logToolbar->addStretch();
+            logToolbar->addWidget(autoScrollLogsButton_);
+            logContainerLayout->addLayout(logToolbar);
+            logContainerLayout->addWidget(logWidget_);
+
+            auto *verticalSplitter = new QSplitter(Qt::Vertical);
+            verticalSplitter->addWidget(splitter);
+            verticalSplitter->addWidget(logContainer);
+            verticalSplitter->setStretchFactor(0, 1);
+            verticalSplitter->setSizes({700, 200});
+
+            mainLayout->addWidget(verticalSplitter);
             setCentralWidget(central);
 
             connect(tree_, &QTreeWidget::currentItemChanged, this, &MainWindow::onTreeSelectionChanged);
@@ -538,14 +619,17 @@ namespace {
                 const auto savedNamespace =
                     Configuration::instance().GetValue<QString>("ui.last-namespace", QString());
                 if (!savedNamespace.isEmpty()) {
-                    const int idx = namespaceBox_->findText(savedNamespace);
-                    if (idx >= 0) namespaceBox_->setCurrentIndex(idx);
+                    if (const int idx = namespaceBox_->findText(savedNamespace); idx >= 0) namespaceBox_->setCurrentIndex(idx);
                 }
             }
 
             const auto savedNavItem = Configuration::instance().GetValue<QString>("ui.last-nav-item", QString());
             QTreeWidgetItem* restoredItem = savedNavItem.isEmpty() ? nullptr : findLeafByLabel(savedNavItem);
             tree_->setCurrentItem(restoredItem ? restoredItem : nodesItem_);
+
+            // Show the login prompt once the event loop starts, so it appears on top of
+            // the already-visible main window rather than blocking its own construction.
+            QTimer::singleShot(0, this, &MainWindow::showLoginDialog);
         }
 
     private:
@@ -586,6 +670,10 @@ namespace {
                     headers = {"Name", "Type", "Cluster IP", "Created", "Age"};
                     namespaced = true;
                     break;
+                case PageKind::Ingresses:
+                    headers = {"Name", "Age"};
+                    namespaced = true;
+                    break;
                 case PageKind::Nodes:
                     headers = {"Name", "Status", "Version", "Internal IP", "CPU Requests", "CPU Limits", "CPU Capacity", "Pods", "Created"};
                     break;
@@ -619,6 +707,7 @@ namespace {
             specs_.push_back({kind, kubectlName, namespaceColumn});
 
             if (auto *pageable = qobject_cast<PageableTable *>(page)) {
+                pageable->setServiceApis({kubectlName});
                 connect(pageable, &PageableTable::ReloadTable, this, &MainWindow::refreshCurrentPage);
                 connect(pageable, &PageableTable::ContextMenuRequested, this,
                         [this, pageIndex](const QPoint &pos) { showTableContextMenu(pageIndex, pos); });
@@ -631,6 +720,9 @@ namespace {
                 } else if (kind == PageKind::Services) {
                     connect(pageable, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showServiceDetailsForRow(pageIndex, index); });
+                } else if (kind == PageKind::Ingresses) {
+                    connect(pageable, &PageableTable::DoubleClicked, this,
+                            [this, pageIndex](const QModelIndex &index) { showIngressDetailsForRow(pageIndex, index); });
                 }
             }
 
@@ -652,7 +744,7 @@ namespace {
 
             auto *service = new QTreeWidgetItem(tree_, {"Service"});
             addLeaf(service, "Services", PageKind::Services, "services");
-            addLeaf(service, "Ingresses", PageKind::Generic, "ingresses");
+            addLeaf(service, "Ingresses", PageKind::Ingresses, "ingresses");
 
             auto *configStorage = new QTreeWidgetItem(tree_, {"Config and Storage"});
             addLeaf(configStorage, "ConfigMaps", PageKind::Generic, "configmaps");
@@ -691,7 +783,21 @@ namespace {
         void onContextChanged() const {
             Configuration::instance().SetValue("ui.last-context", contextBox_->currentText());
             loadNamespaces();
+            updateActiveAwsCredentials();
             refreshCurrentPage();
+        }
+
+        // Derives which OneLogin/AWS account ("int" or "prod") the currently selected
+        // kubectl context belongs to.
+        [[nodiscard]] QString currentAwsAccountKey() const {
+            return contextBox_->currentText().contains("prod", Qt::CaseInsensitive) ? "prod" : "int";
+        }
+
+        // Points g_activeAwsCredentials at whatever cached session (if any) applies to
+        // the currently selected context, so runKubectlCommand picks it up.
+        void updateActiveAwsCredentials() const {
+            const auto it = awsCredentialsByAccount_.find(currentAwsAccountKey());
+            g_activeAwsCredentials = it != awsCredentialsByAccount_.end() ? it.value() : AwsSessionCredentials{};
         }
 
         void onNamespaceChanged() const {
@@ -747,6 +853,9 @@ namespace {
                 case PageKind::Services:
                     fetchServices(table, namespaceColumn);
                     break;
+                case PageKind::Ingresses:
+                    fetchGeneric(table, kubectlName, namespaceColumn);
+                    break;
                 case PageKind::Nodes:
                     fetchNodes(table);
                     break;
@@ -762,6 +871,8 @@ namespace {
 
         void fetchGeneric(PageableTable *table, const QString &resource, const int namespaceColumn) const {
             if (!table) return;
+            QElapsedTimer timer;
+            timer.start();
             const QJsonArray items = fetchItems(resourceArgs(resource));
 
             populatePage(table, items, [&](int row, const QJsonObject &obj) {
@@ -770,10 +881,13 @@ namespace {
                 table->SetColumn(row, 1, computeAge(metadata["creationTimestamp"].toString()));
                 table->SetHiddenColumn(row, namespaceColumn, metadata["namespace"].toString());
             });
+            EventBus::instance().TimerSignal(resource, timer.elapsed());
         }
 
         void fetchPods(PageableTable *table, const int namespaceColumn) const {
             if (!table) return;
+            QElapsedTimer timer;
+            timer.start();
             const QJsonArray items = fetchItems(resourceArgs("pods"));
 
             populatePage(table, items, [&](const int row, const QJsonObject &pod) {
@@ -807,10 +921,13 @@ namespace {
                 table->SetColumn(row, 4, computeAge(metadata["creationTimestamp"].toString()));
                 table->SetHiddenColumn(row, namespaceColumn, metadata["namespace"].toString());
             });
+            EventBus::instance().TimerSignal("pods", timer.elapsed());
         }
 
         void fetchJobs(PageableTable *table, int namespaceColumn) const {
             if (!table) return;
+            QElapsedTimer timer;
+            timer.start();
             const QJsonArray items = fetchItems(resourceArgs("jobs"));
 
             populatePage(table, items, [&](int row, const QJsonObject &job) {
@@ -842,10 +959,13 @@ namespace {
                 table->SetColumn(row, 4, computeAge(metadata["creationTimestamp"].toString()), Qt::AlignRight | Qt::AlignVCenter);
                 table->SetHiddenColumn(row, namespaceColumn, metadata["namespace"].toString());
             });
+            EventBus::instance().TimerSignal("jobs", timer.elapsed());
         }
 
         void fetchServices(PageableTable *table, int namespaceColumn) const {
             if (!table) return;
+            QElapsedTimer timer;
+            timer.start();
             const QJsonArray items = fetchItems(resourceArgs("services"));
 
             populatePage(table, items, [&](int row, const QJsonObject &svc) {
@@ -860,10 +980,13 @@ namespace {
                                  Qt::AlignRight | Qt::AlignVCenter);
                 table->SetHiddenColumn(row, namespaceColumn, metadata["namespace"].toString());
             });
+            EventBus::instance().TimerSignal("services", timer.elapsed());
         }
 
         void fetchNamespaces(PageableTable *table) const {
             if (!table) return;
+            QElapsedTimer timer;
+            timer.start();
             QStringList args = baseArgs();
             args << "get" << "namespaces" << "-o" << "json";
             const QJsonArray items = fetchItems(args);
@@ -874,10 +997,13 @@ namespace {
                 table->SetColumn(row, 1, obj["status"].toObject()["phase"].toString());
                 table->SetColumn(row, 2, computeAge(metadata["creationTimestamp"].toString()));
             });
+            EventBus::instance().TimerSignal("namespaces", timer.elapsed());
         }
 
         void fetchNodes(PageableTable *table) const {
             if (!table) return;
+            QElapsedTimer timer;
+            timer.start();
             QStringList args = baseArgs();
             args << "get" << "nodes" << "-o" << "json";
             const QJsonArray items = fetchItems(args);
@@ -936,6 +1062,7 @@ namespace {
                 table->SetColumn(row, 7, pods, Qt::AlignRight | Qt::AlignVCenter);
                 table->SetColumn(row, 8, formatCreated(metadata["creationTimestamp"].toString()));
             });
+            EventBus::instance().TimerSignal("nodes", timer.elapsed());
         }
 
         void showTableContextMenu(int pageIndex, const QPoint &pos) {
@@ -1019,6 +1146,12 @@ namespace {
             auto *containerBox = new QComboBox(&dialog);
             topBar->addWidget(containerBox);
             topBar->addStretch();
+            auto *autoScrollButton = new QToolButton(&dialog);
+            autoScrollButton->setIcon(IconUtils::GetIcon("scroll"));
+            autoScrollButton->setCheckable(true);
+            autoScrollButton->setChecked(true);
+            autoScrollButton->setToolTip("Auto-scroll to bottom");
+            topBar->addWidget(autoScrollButton);
             auto *refreshButton = new QPushButton(&dialog);
             refreshButton->setIcon(IconUtils::GetIcon("refresh"));
             refreshButton->setToolTip("Refresh");
@@ -1053,14 +1186,22 @@ namespace {
             };
             updateContainers();
 
-            auto fetchLogs = [this, logView, podBox, containerBox, ns] {
+            auto setLogText = [logView, autoScrollButton](const QString &text) {
+                logView->setPlainText(text);
+                if (autoScrollButton->isChecked()) {
+                    logView->moveCursor(QTextCursor::End);
+                    logView->ensureCursorVisible();
+                }
+            };
+
+            auto fetchLogs = [this, logView, podBox, containerBox, ns, setLogText] {
                 if (containerBox->currentText().isEmpty()) return;
                 BusyGuard busyGuard;
                 QStringList logArgs = baseArgs();
                 logArgs << "logs" << podBox->currentText() << "-n" << ns << "-c" << containerBox->currentText()
                         << "--tail=2000";
                 const KubectlResult logResult = runKubectlCommand(logArgs);
-                logView->setPlainText(logResult.success ? logResult.output : "Failed to fetch logs: " + logResult.error);
+                setLogText(logResult.success ? logResult.output : "Failed to fetch logs: " + logResult.error);
             };
 
             connect(podBox, &QComboBox::currentIndexChanged, this, [updateContainers, fetchLogs](int) {
@@ -1074,7 +1215,7 @@ namespace {
             connect(closeButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             layout->addWidget(closeButtons);
 
-            logView->setPlainText(initialLogs);
+            setLogText(initialLogs);
 
             dialog.exec();
         }
@@ -1721,13 +1862,312 @@ namespace {
             dialog.exec();
         }
 
+        void showIngressDetailsForRow(int pageIndex, const QModelIndex &index) {
+            const ResourceSpec &spec = specs_[pageIndex];
+            auto *table = qobject_cast<PageableTable *>(pages_->widget(pageIndex));
+            if (!table || !index.isValid()) return;
+
+            const auto name = table->GetValue<QString>(index, 0);
+            const QString ns = table->GetValue<QString>(index, spec.namespaceColumn);
+            showIngressDetails(name, ns);
+        }
+
+        void showIngressDetails(const QString &name, const QString &ns) {
+            QJsonObject ingress;
+            QJsonArray events;
+            {
+                BusyGuard busyGuard;
+                QStringList getArgs = baseArgs();
+                getArgs << "get" << "ingresses" << name << "-n" << ns << "-o" << "json";
+                const KubectlResult ingressResult = runKubectlCommand(getArgs);
+                if (!ingressResult.success) {
+                    QMessageBox::warning(this, "Ingress details failed", ingressResult.error);
+                    return;
+                }
+                ingress = QJsonDocument::fromJson(ingressResult.output.toUtf8()).object();
+
+                QStringList eventArgs = baseArgs();
+                eventArgs << "get" << "events" << "-n" << ns << "--field-selector"
+                          << "involvedObject.name=" + name + ",involvedObject.kind=Ingress" << "-o" << "json";
+                events = fetchItems(eventArgs);
+            }
+
+            const QJsonObject metadata = ingress["metadata"].toObject();
+            const QJsonObject spec = ingress["spec"].toObject();
+            const QJsonObject status = ingress["status"].toObject();
+
+            QDialog dialog(this);
+            dialog.setWindowTitle("Ingress: " + ns + "/" + name);
+            dialog.resize(1100, 800);
+
+            auto *content = new QWidget();
+            auto *layout = new QVBoxLayout(content);
+
+            auto *metaBox = new QGroupBox("Metadata");
+            auto *metaForm = new QFormLayout(metaBox);
+            metaForm->addRow("Name", new QLabel(metadata["name"].toString()));
+            metaForm->addRow("Namespace", new QLabel(metadata["namespace"].toString()));
+            metaForm->addRow("Created", new QLabel(formatCreated(metadata["creationTimestamp"].toString())));
+            metaForm->addRow("Age", new QLabel(computeAge(metadata["creationTimestamp"].toString())));
+            metaForm->addRow("UID", new QLabel(metadata["uid"].toString()));
+            auto *labelsValue = new QLabel(joinKeyValues(metadata["labels"].toObject()));
+            labelsValue->setWordWrap(true);
+            metaForm->addRow("Labels", labelsValue);
+            auto *annotationsValue = new QLabel(joinKeyValues(metadata["annotations"].toObject()));
+            annotationsValue->setWordWrap(true);
+            metaForm->addRow("Annotations", annotationsValue);
+            layout->addWidget(metaBox);
+
+            auto *resourceBox = new QGroupBox("Resource information");
+            auto *resourceForm = new QFormLayout(resourceBox);
+            resourceForm->addRow("Ingress Class Name", new QLabel(spec["ingressClassName"].toString()));
+            QStringList endpoints;
+            for (const auto &lbValue: status["loadBalancer"].toObject()["ingress"].toArray()) {
+                const QJsonObject lb = lbValue.toObject();
+                const QString host = lb["hostname"].toString();
+                endpoints << (!host.isEmpty() ? host : lb["ip"].toString());
+            }
+            auto *endpointsLabel = new QLabel(endpoints.isEmpty() ? "-" : endpoints.join("\n"));
+            endpointsLabel->setWordWrap(true);
+            resourceForm->addRow("Endpoints", endpointsLabel);
+            layout->addWidget(resourceBox);
+
+            auto *rulesBox = new QGroupBox("Rules");
+            auto *rulesLayout = new QVBoxLayout(rulesBox);
+
+            QHash<QString, QString> tlsSecretByHost;
+            for (const auto &tlsValue: spec["tls"].toArray()) {
+                const QJsonObject tls = tlsValue.toObject();
+                const QString secretName = tls["secretName"].toString();
+                for (const auto &hostValue: tls["hosts"].toArray()) {
+                    tlsSecretByHost[hostValue.toString()] = secretName;
+                }
+            }
+
+            struct RuleRow {
+                QString host, path, pathType, serviceName, servicePort, tlsSecret;
+            };
+            QList<RuleRow> ruleRows;
+            for (const auto &ruleValue: spec["rules"].toArray()) {
+                const QJsonObject rule = ruleValue.toObject();
+                const QString host = rule["host"].toString();
+                for (const auto &pathValue: rule["http"].toObject()["paths"].toArray()) {
+                    const QJsonObject pathObj = pathValue.toObject();
+                    const QJsonObject backendService = pathObj["backend"].toObject()["service"].toObject();
+                    const QJsonValue portValue = backendService["port"].toObject()["number"];
+                    ruleRows.append({host, pathObj["path"].toString(), pathObj["pathType"].toString(),
+                                      backendService["name"].toString(),
+                                      portValue.isDouble() ? QString::number(portValue.toInt()) : QStringLiteral("-"),
+                                      tlsSecretByHost.value(host, "-")});
+                }
+            }
+
+            if (ruleRows.isEmpty()) {
+                auto *emptyLabel = new QLabel("There is nothing to display here\nNo resources found.");
+                emptyLabel->setAlignment(Qt::AlignCenter);
+                rulesLayout->addWidget(emptyLabel);
+            } else {
+                auto *rulesTable = makeDetailTable({"Host", "Path", "Path Type", "Service Name", "Service Port", "TLS Secret"});
+                rulesTable->setRowCount(ruleRows.size());
+                for (int i = 0; i < ruleRows.size(); ++i) {
+                    const RuleRow &r = ruleRows[i];
+                    rulesTable->setItem(i, 0, new QTableWidgetItem(r.host));
+                    rulesTable->setItem(i, 1, new QTableWidgetItem(r.path));
+                    rulesTable->setItem(i, 2, new QTableWidgetItem(r.pathType));
+                    rulesTable->setItem(i, 3, new QTableWidgetItem(r.serviceName));
+                    rulesTable->setItem(i, 4, new QTableWidgetItem(r.servicePort));
+                    rulesTable->setItem(i, 5, new QTableWidgetItem(r.tlsSecret));
+                }
+                rulesLayout->addWidget(rulesTable);
+            }
+            layout->addWidget(rulesBox);
+
+            auto *eventsBox = new QGroupBox(QString("Events (%1)").arg(events.size()));
+            auto *eventsLayout = new QVBoxLayout(eventsBox);
+            auto *eventsTable = makeDetailTable({"Type", "Reason", "Message", "Age"});
+            eventsTable->setRowCount(events.size());
+            for (int i = 0; i < events.size(); ++i) {
+                const QJsonObject event = events[i].toObject();
+                eventsTable->setItem(i, 0, new QTableWidgetItem(event["type"].toString()));
+                eventsTable->setItem(i, 1, new QTableWidgetItem(event["reason"].toString()));
+                eventsTable->setItem(i, 2, new QTableWidgetItem(event["message"].toString()));
+                eventsTable->setItem(i, 3, new QTableWidgetItem(computeAge(event["lastTimestamp"].toString())));
+            }
+            eventsLayout->addWidget(eventsTable);
+            layout->addWidget(eventsBox);
+
+            auto *scrollArea = new QScrollArea(&dialog);
+            scrollArea->setWidgetResizable(true);
+            scrollArea->setWidget(content);
+
+            auto *dialogLayout = new QVBoxLayout(&dialog);
+            dialogLayout->addWidget(scrollArea);
+
+            dialog.exec();
+        }
+
+        // Shows a small dialog asking only for the authenticator token, and returns what
+        // was typed (or an empty string if cancelled). Called by LoginWithOneLogin only
+        // once the MFA challenge has actually arrived, so the code is submitted almost
+        // immediately after being entered rather than sitting around expiring.
+        QString promptForOtpToken() {
+            QDialog dialog(this);
+            dialog.setWindowTitle("OneLogin Sign In");
+
+            auto *form = new QFormLayout(&dialog);
+            auto *otpEdit = new QLineEdit(&dialog);
+            form->addRow("Authenticator Token", otpEdit);
+
+            auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            buttons->button(QDialogButtonBox::Ok)->setText("Verify");
+            form->addRow(buttons);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted) return {};
+            return otpEdit->text();
+        }
+
+        // Writes the new session credentials to ~/.aws/credentials under a profile named
+        // after the account, and points that kubeconfig context's exec plugin at that
+        // profile -- so kubectl/aws used outside kubewatch (a plain terminal, another
+        // tool) also picks up the freshly-obtained session. Best-effort: a failure here
+        // doesn't affect kubewatch's own kubectl calls, which already use the in-memory
+        // credentials directly.
+        void updateExternalAwsConfig(const QString &accountKey, const AwsSessionCredentials &credentials,
+                                      const QString &contextName) const {
+            const QList<QStringList> setCalls = {
+                {"configure", "set", "aws_access_key_id", credentials.accessKeyId, "--profile", accountKey},
+                {"configure", "set", "aws_secret_access_key", credentials.secretAccessKey, "--profile", accountKey},
+                {"configure", "set", "aws_session_token", credentials.sessionToken, "--profile", accountKey},
+            };
+            for (const QStringList &args: setCalls) {
+                QProcess process;
+                process.start("aws", args);
+                if (!process.waitForFinished(10000) || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+                    logWarning << "Failed to update ~/.aws/credentials profile" << accountKey << ":"
+                               << QString::fromLocal8Bit(process.readAllStandardError());
+                    return;
+                }
+            }
+            logInfo << "Updated ~/.aws/credentials profile" << accountKey;
+
+            const KubectlResult viewResult = runKubectlCommand({"--kubeconfig", kKubeconfig, "config", "view", "-o", "json"});
+            if (!viewResult.success) {
+                logWarning << "Failed to read kubeconfig to update exec credentials:" << viewResult.error;
+                return;
+            }
+            const QJsonArray contexts = QJsonDocument::fromJson(viewResult.output.toUtf8()).object()["contexts"].toArray();
+            QString userName;
+            for (const auto &contextValue: contexts) {
+                if (const QJsonObject contextObj = contextValue.toObject(); contextObj["name"].toString() == contextName) {
+                    userName = contextObj["context"].toObject()["user"].toString();
+                    break;
+                }
+            }
+            if (userName.isEmpty()) {
+                logWarning << "Could not find kubeconfig user for context" << contextName;
+                return;
+            }
+
+            const KubectlResult setCredsResult = runKubectlCommand(
+                {"--kubeconfig", kKubeconfig, "config", "set-credentials", userName, "--exec-env=AWS_PROFILE=" + accountKey});
+            if (!setCredsResult.success) {
+                logWarning << "Failed to update kubeconfig exec env for user" << userName << ":" << setCredsResult.error;
+                return;
+            }
+            logInfo << "Updated kubeconfig user" << userName << "to use AWS profile" << accountKey;
+        }
+
+        void showLoginDialog() {
+            QDialog dialog(this);
+            dialog.setWindowTitle("OneLogin Sign In");
+            dialog.setMinimumWidth(450);
+
+            auto *form = new QFormLayout(&dialog);
+
+            auto *contextCombo = new QComboBox(&dialog);
+            for (int i = 0; i < contextBox_->count(); ++i) {
+                contextCombo->addItem(contextBox_->itemText(i));
+            }
+            contextCombo->setCurrentText(contextBox_->currentText());
+            form->addRow("Context", contextCombo);
+
+            auto *usernameEdit = new QLineEdit(&dialog);
+            usernameEdit->setText(Configuration::instance().GetValue<QString>("onelogin.user", QString()));
+            auto *passwordEdit = new QLineEdit(&dialog);
+            passwordEdit->setEchoMode(QLineEdit::Password);
+
+            form->addRow("Username:", usernameEdit);
+            form->addRow("Password:", passwordEdit);
+
+            auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            buttons->button(QDialogButtonBox::Ok)->setText("Login");
+            form->addRow(buttons);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted) return;
+
+            const QString selectedContext = contextCombo->currentText();
+            if (selectedContext.isEmpty()) {
+                QMessageBox::warning(this, "Login", "No context selected.");
+                return;
+            }
+            // Switch the main window to the chosen context too, so the user ends up
+            // browsing whatever cluster they just signed in for.
+            if (const int idx = contextBox_->findText(selectedContext); idx >= 0 && idx != contextBox_->currentIndex()) {
+                contextBox_->setCurrentIndex(idx);
+            }
+
+            const QString username = usernameEdit->text();
+            const QString password = passwordEdit->text();
+            if (username.isEmpty() || password.isEmpty()) {
+                QMessageBox::warning(this, "Login", "Username and password are both required.");
+                return;
+            }
+
+            const QString accountKey = currentAwsAccountKey();
+            const long appId = Configuration::instance().GetValue<long>("onelogin.app-id." + accountKey, 0L);
+            if (appId == 0) {
+                QMessageBox::warning(this, "Login",
+                                      "No OneLogin app-id configured for account \"" + accountKey + "\".");
+                return;
+            }
+
+            AwsSessionCredentials credentials;
+            QString error;
+            {
+                BusyGuard busyGuard;
+                credentials = LoginWithOneLogin(
+                    username, password, [this] { return promptForOtpToken(); }, appId, &error);
+            }
+
+            if (!credentials.isValid()) {
+                QMessageBox::warning(this, "Login failed", error.isEmpty() ? "Unknown error." : error);
+                return;
+            }
+
+            awsCredentialsByAccount_[accountKey] = credentials;
+            updateActiveAwsCredentials();
+            Configuration::instance().SetValue("onelogin.user", username);
+            updateExternalAwsConfig(accountKey, credentials, selectedContext);
+
+            QMessageBox::information(this, "Login",
+                                      "Signed in for account \"" + accountKey + "\". Session valid until " +
+                                          credentials.expiresAt.toLocalTime().toString("yyyy-MM-dd HH:mm:ss") + ".");
+        }
+
         QComboBox *contextBox_;
         QComboBox *namespaceBox_;
         QLabel *statusLabel_;
         QTreeWidget *tree_;
         QStackedWidget *pages_;
+        QListWidget *logWidget_;
+        QToolButton *autoScrollLogsButton_;
         QTreeWidgetItem *nodesItem_ = nullptr;
         std::vector<ResourceSpec> specs_;
+        QMap<QString, AwsSessionCredentials> awsCredentialsByAccount_;
     };
 }
 
@@ -1761,6 +2201,8 @@ int main(int argc, char *argv[]) {
     QApplication a(argc, argv);
     applyDarkTheme(a);
     Configuration::instance().SetFilePath(ensureConfigFile());
+    qInstallMessageHandler(myCustomMessageHandler);
+    LogSignaler::instance().SetLevel(DEBUG);
     MainWindow window;
     window.show();
     return QApplication::exec();
