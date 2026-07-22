@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/jensvogt/kubewatch/compare/1.1.3...1.2.0) (2026-07-22)
+
+
+### New Features
+
+* fix job/pods view ([16c06db](https://github.com/jensvogt/kubewatch/commit/16c06dba4d00bf23408b61a6287737c0d00c4f5e))
+* fix job/pods view ([5f7a9fb](https://github.com/jensvogt/kubewatch/commit/5f7a9fb615a398741392a3bbf24b280320365c6c))
+
 ## [1.1.3](https://github.com/jensvogt/kubewatch/compare/1.1.2...1.1.3) (2026-07-22)
 
 
