@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/jensvogt/kubewatch/compare/1.2.0...1.3.0) (2026-07-23)
+
+
+### New Features
+
+* add update feature ([fbe7876](https://github.com/jensvogt/kubewatch/commit/fbe7876250358cf69dc06e4c0bf82df2ab443493))
+
 ## [1.2.0](https://github.com/jensvogt/kubewatch/compare/1.1.3...1.2.0) (2026-07-22)
 
 
