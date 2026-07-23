@@ -6,4 +6,10 @@
     <Publisher>Jens Vogt</Publisher>
     <StartMenuDir>kubewatch</StartMenuDir>
     <TargetDir>@ApplicationsDir@/kubewatch</TargetDir>
+    <RemoteRepositories>
+        <Repository>
+            <Url>https://jensvogt.github.io/kubewatch</Url>
+            <Enabled>true</Enabled>
+        </Repository>
+    </RemoteRepositories>
 </Installer>

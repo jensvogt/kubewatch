@@ -10,3 +10,6 @@ installer/config/config.xml
 installer/packages/*/meta/package.xml
 installer/packages/*/data/
 installer/*.exe
+
+# Generated from cmake/version.h.in
+include/Version.h
