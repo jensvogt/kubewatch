@@ -68,6 +68,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install -U aqtinstall
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Pin py7zr: newer releases add symlink-path sanitization that misfires on
+          # legitimate Qt archive paths on Windows, aborting extraction with
+          # "Bad7zFile: Specified path is bad: ..." (upstream bug, still open:
+          # https://github.com/miurahr/aqtinstall/issues/995).
+          python -m pip install "py7zr==1.1.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install Qt and Qt Installer Framework (IFW)
         shell: powershell
