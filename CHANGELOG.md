@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.4](https://github.com/jensvogt/kubewatch/compare/1.3.3...1.3.4) (2026-07-23)
+
+
+### Bug Fixes
+
+* new icons for the installer and the windows application plus shortcut ([25bcc90](https://github.com/jensvogt/kubewatch/commit/25bcc90fb53a4eba37f56fdd2762fe3a63a56829))
+* new icons for the installer and the windows application plus shortcut ([3337f82](https://github.com/jensvogt/kubewatch/commit/3337f82466128c2cebe272d81fe4bd6b4f9a5299))
+
 ## [1.3.3](https://github.com/jensvogt/kubewatch/compare/1.3.2...1.3.3) (2026-07-23)
 
 
