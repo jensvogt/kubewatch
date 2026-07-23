@@ -45,6 +45,6 @@ Write-Host "Building installer with binarycreator..."
 $binaryCreator = Join-Path $IfwDir "bin\binarycreator.exe"
 if (!(Test-Path $binaryCreator)) { throw "binarycreator not found: $binaryCreator" }
 $outputExe = Join-Path $installerDir "kubewatch-$version-windows.exe"
-& $binaryCreator --hybrid -c (Join-Path $installerDir "config\config.xml") -p (Join-Path $installerDir "packages") $outputExe
+& $binaryCreator --offline-only -c (Join-Path $installerDir "config\config.xml") -p (Join-Path $installerDir "packages") $outputExe
 
 Write-Host "Installer created: $outputExe"

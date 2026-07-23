@@ -113,7 +113,7 @@ jobs:
           if (-not $ifwRoot) { Write-Error "IFW not found"; exit 1 }
           $ifwBin = Join-Path $ifwRoot.FullName "bin"
           $env:PATH = "$ifwBin;$env:PATH"
-          binarycreator --hybrid -c "$env:INSTALLER_DIR\config\config.xml" -p "$env:INSTALLER_DIR\packages" "$env:INSTALLER_DIR\$env:APP_NAME-$env:SEMVER-windows.exe"
+          binarycreator --offline-only -c "$env:INSTALLER_DIR\config\config.xml" -p "$env:INSTALLER_DIR\packages" "$env:INSTALLER_DIR\$env:APP_NAME-$env:SEMVER-windows.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows installer
