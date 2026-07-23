@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/jensvogt/kubewatch/compare/1.3.2...1.3.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* installer updates handling ([84f535a](https://github.com/jensvogt/kubewatch/commit/84f535ae6ba3963499a98b5bdc1002416317775e))
+
 ## [1.3.2](https://github.com/jensvogt/kubewatch/compare/1.3.1...1.3.2) (2026-07-23)
 
 
