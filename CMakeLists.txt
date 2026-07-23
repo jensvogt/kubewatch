@@ -34,9 +34,14 @@ find_package(Qt6 COMPONENTS
         Network
         REQUIRED)
 
+if (WIN32)
+    set(APP_ICON_RESOURCE resources/kubewatch.rc)
+endif ()
+
 add_executable(kubewatch WIN32 MACOSX_BUNDLE
         main.cpp
         resources/awsmock-qt-ui.qrc
+        ${APP_ICON_RESOURCE}
         include/components/PageableTable.h
         src/components/PageableTable.cpp
         src/components/PageableTable.ui

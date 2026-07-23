@@ -447,6 +447,28 @@ namespace {
         statusForm->addRow("Started At", new QLabel(startedAt));
         layout->addLayout(statusForm);
 
+        // The single most useful signal for "pod restarted but the app's own logs show
+        // nothing" -- covers kills the process never got to log (OOMKilled, a failed
+        // liveness probe, node-triggered SIGKILL/SIGTERM).
+        if (const QJsonObject lastTerminated = containerStatus["lastState"].toObject()["terminated"].toObject();
+            !lastTerminated.isEmpty()) {
+            auto *lastStateBox = new QGroupBox("Last Termination");
+            auto *lastStateForm = new QFormLayout(lastStateBox);
+            lastStateForm->addRow("Reason", new QLabel(lastTerminated["reason"].toString()));
+            lastStateForm->addRow("Exit Code", new QLabel(QString::number(lastTerminated["exitCode"].toInt())));
+            if (const int signal = lastTerminated["signal"].toInt(); signal != 0) {
+                lastStateForm->addRow("Signal", new QLabel(QString::number(signal)));
+            }
+            lastStateForm->addRow("Started At", new QLabel(formatCreated(lastTerminated["startedAt"].toString())));
+            lastStateForm->addRow("Finished At", new QLabel(formatCreated(lastTerminated["finishedAt"].toString())));
+            if (const QString message = lastTerminated["message"].toString(); !message.isEmpty()) {
+                auto *messageLabel = new QLabel(message);
+                messageLabel->setWordWrap(true);
+                lastStateForm->addRow("Message", messageLabel);
+            }
+            layout->addWidget(lastStateBox);
+        }
+
         QStringList envLines;
         for (const auto &envValue: containerSpec["env"].toArray()) {
             const QJsonObject env = envValue.toObject();
@@ -1289,6 +1311,11 @@ namespace {
             topBar->addWidget(new QLabel("Container:"));
             auto *containerBox = new QComboBox(&dialog);
             topBar->addWidget(containerBox);
+            auto *previousButton = new QToolButton(&dialog);
+            previousButton->setIcon(IconUtils::GetIcon("previous"));
+            previousButton->setCheckable(true);
+            previousButton->setToolTip("Show logs from the previous container instance (before the last restart)");
+            topBar->addWidget(previousButton);
             topBar->addStretch();
             auto *autoScrollButton = new QToolButton(&dialog);
             autoScrollButton->setIcon(IconUtils::GetIcon("scroll"));
@@ -1338,12 +1365,13 @@ namespace {
                 }
             };
 
-            auto fetchLogs = [this, logView, podBox, containerBox, ns, setLogText] {
+            auto fetchLogs = [this, logView, podBox, containerBox, previousButton, ns, setLogText] {
                 if (containerBox->currentText().isEmpty()) return;
                 BusyGuard busyGuard;
                 QStringList logArgs = baseArgs();
                 logArgs << "logs" << podBox->currentText() << "-n" << ns << "-c" << containerBox->currentText()
                         << "--tail=2000";
+                if (previousButton->isChecked()) logArgs << "--previous";
                 const KubectlResult logResult = runKubectlCommand(logArgs);
                 setLogText(logResult.success ? logResult.output : "Failed to fetch logs: " + logResult.error);
             };
@@ -1353,6 +1381,7 @@ namespace {
                 fetchLogs();
             });
             connect(containerBox, &QComboBox::currentIndexChanged, this, [fetchLogs](int) { fetchLogs(); });
+            connect(previousButton, &QToolButton::toggled, this, [fetchLogs](bool) { fetchLogs(); });
             connect(refreshButton, &QPushButton::clicked, this, [fetchLogs] { fetchLogs(); });
 
             auto *closeButtons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
@@ -2565,6 +2594,7 @@ namespace {
 
 int main(int argc, char *argv[]) {
     QApplication a(argc, argv);
+    a.setWindowIcon(IconUtils::GetCommonIcon("kubewatch"));
     applyDarkTheme(a);
     Configuration::instance().SetFilePath(ensureConfigFile());
     qInstallMessageHandler(myCustomMessageHandler);
