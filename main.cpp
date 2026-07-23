@@ -4,6 +4,7 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -47,16 +48,20 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <Version.h>
 #include <components/PageableTable.h>
 #include <onelogin/OneLoginAuth.h>
 #include <utils/Configuration.h>
 #include <utils/EventBus.h>
 #include <utils/IconUtils.h>
 #include <utils/Logging.h>
+#include <utils/UpdateChecker.h>
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -95,6 +100,52 @@ namespace {
     private:
         QTimer timer_;
         int angle_ = 0;
+    };
+
+    // Small donut gauge used by the Node detail dialog's Allocation section: a colored
+    // ring filled to `percent` (green/orange/red by threshold), with the percentage and
+    // a short label centered inside, and a caption (e.g. "Cores: 2.95") below the ring.
+    class PercentageRing : public QWidget {
+    public:
+        PercentageRing(double percent, QString label, QString caption, QWidget *parent = nullptr)
+            : QWidget(parent), percent_(percent), label_(std::move(label)), caption_(std::move(caption)) {
+            setFixedSize(110, 132);
+        }
+
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            QPainter painter(this);
+            painter.setRenderHint(QPainter::Antialiasing);
+
+            constexpr qreal penWidth = 8.0;
+            const QRectF ringRect(penWidth / 2, penWidth / 2, 100 - penWidth, 100 - penWidth);
+
+            const QColor color = percent_ < 60 ? QColor(76, 175, 80)
+                                  : percent_ < 90 ? QColor(255, 152, 0)
+                                                  : QColor(229, 57, 53);
+
+            QPen bgPen(QColor(70, 70, 70));
+            bgPen.setWidthF(penWidth);
+            painter.setPen(bgPen);
+            painter.drawEllipse(ringRect);
+
+            QPen fgPen(color);
+            fgPen.setWidthF(penWidth);
+            fgPen.setCapStyle(Qt::RoundCap);
+            painter.setPen(fgPen);
+            const int spanAngle = -static_cast<int>(std::clamp(percent_, 0.0, 100.0) / 100.0 * 360 * 16);
+            painter.drawArc(ringRect, 90 * 16, spanAngle);
+
+            painter.setPen(palette().color(QPalette::WindowText));
+            painter.drawText(QRectF(0, 0, 100, 100), Qt::AlignCenter,
+                              QString("%1%\n%2").arg(QString::number(percent_, 'f', 1), label_));
+            painter.drawText(QRectF(0, 100, 100, 30), Qt::AlignHCenter | Qt::AlignTop, caption_);
+        }
+
+    private:
+        double percent_;
+        QString label_;
+        QString caption_;
     };
 
     // Semi-transparent overlay with a busy indicator, shown over the main window
@@ -270,6 +321,35 @@ namespace {
         return QString("%1m").arg(millis);
     }
 
+    // Parses a Kubernetes memory quantity ("128Mi", "2Gi", "512k", plain bytes) into bytes.
+    qint64 parseMemoryBytes(const QString &value) {
+        if (value.isEmpty()) return 0;
+        static const QList<std::pair<QString, qint64>> suffixes = {
+            {"Ki", 1024LL}, {"Mi", 1024LL * 1024}, {"Gi", 1024LL * 1024 * 1024}, {"Ti", 1024LL * 1024 * 1024 * 1024},
+            {"K", 1000LL}, {"M", 1000LL * 1000}, {"G", 1000LL * 1000 * 1000}, {"T", 1000LL * 1000 * 1000 * 1000},
+        };
+        for (const auto &[suffix, factor]: suffixes) {
+            if (value.endsWith(suffix)) {
+                return static_cast<qint64>(value.chopped(suffix.size()).toDouble() * factor);
+            }
+        }
+        bool ok = false;
+        const qint64 bytes = value.toLongLong(&ok);
+        return ok ? bytes : 0;
+    }
+
+    QString formatMemoryGiB(qint64 bytes) {
+        return QString::number(bytes / (1024.0 * 1024.0 * 1024.0), 'f', 1) + " Gi";
+    }
+
+    // Succeeded/Failed pods linger in the API (e.g. completed Job/CronJob pods) without
+    // holding any node resources. kubectl describe node's "Non-terminated Pods" summary
+    // (and the Kubernetes Dashboard's node Allocation section) exclude them for exactly
+    // this reason -- otherwise counts/CPU/memory sums come out inflated.
+    bool isTerminatedPodPhase(const QString &phase) {
+        return phase == "Succeeded" || phase == "Failed";
+    }
+
     QString joinKeyValues(const QJsonObject &obj) {
         QStringList pairs;
         for (auto it = obj.begin(); it != obj.end(); ++it) {
@@ -287,6 +367,22 @@ namespace {
         table->horizontalHeader()->setStretchLastSection(true);
         table->verticalHeader()->setVisible(false);
         return table;
+    }
+
+    // Builds one titled column of the Allocation section (e.g. "CPU") out of one or more
+    // side-by-side PercentageRing gauges (e.g. Requests/Limits).
+    QWidget *makeAllocationColumn(const QString &title, const QList<PercentageRing *> &rings) {
+        auto *column = new QWidget();
+        auto *columnLayout = new QVBoxLayout(column);
+        auto *titleLabel = new QLabel(title);
+        titleLabel->setAlignment(Qt::AlignHCenter);
+        columnLayout->addWidget(titleLabel);
+        auto *ringsRow = new QHBoxLayout();
+        for (auto *ring: rings) {
+            ringsRow->addWidget(ring);
+        }
+        columnLayout->addLayout(ringsRow);
+        return column;
     }
 
     QJsonObject findByName(const QJsonArray &array, const QString &name) {
@@ -518,11 +614,6 @@ namespace {
             namespaceBox_ = new QComboBox();
             toolbar->addWidget(namespaceBox_);
 
-            auto *loginAction = new QAction(IconUtils::GetIcon("connect"), "Login", this);
-            loginAction->setToolTip("Sign in via OneLogin");
-            connect(loginAction, &QAction::triggered, this, &MainWindow::showLoginDialog);
-            toolbar->addAction(loginAction);
-
             auto *spacer = new QWidget();
             spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
             toolbar->addWidget(spacer);
@@ -531,6 +622,11 @@ namespace {
             refreshAction->setToolTip("Refresh");
             connect(refreshAction, &QAction::triggered, this, &MainWindow::refreshCurrentPage);
             toolbar->addAction(refreshAction);
+
+            auto *updateAction = new QAction(IconUtils::GetIcon("update"), QString(), this);
+            updateAction->setToolTip("Check for Update");
+            connect(updateAction, &QAction::triggered, this, [this] { updateChecker_->checkForUpdates(); });
+            toolbar->addAction(updateAction);
 
             auto *central = new QWidget(this);
             auto *mainLayout = new QVBoxLayout(central);
@@ -551,9 +647,9 @@ namespace {
             logWidget_->setUniformItemSizes(true);
             logWidget_->setSelectionMode(QAbstractItemView::ExtendedSelection);
             logWidget_->setDragEnabled(true);
-            QFont logFont("Courier New");
-            logFont.setStyleHint(QFont::Monospace);
-            logWidget_->setFont(logFont);
+            // QFont logFont("Courier New");
+            // logFont.setStyleHint(QFont::Monospace);
+            // logWidget_->setFont(logFont);
 
             autoScrollLogsButton_ = new QToolButton();
             autoScrollLogsButton_->setIcon(IconUtils::GetIcon("scroll"));
@@ -630,9 +726,40 @@ namespace {
             // Show the login prompt once the event loop starts, so it appears on top of
             // the already-visible main window rather than blocking its own construction.
             QTimer::singleShot(0, this, &MainWindow::showLoginDialog);
+
+            startUpdateChecker();
         }
 
     private:
+        // Checks version.txt on GitHub Pages against APP_VERSION: once silently shortly
+        // after startup (and periodically thereafter), and on demand via the toolbar
+        // action (which also confirms when already up to date).
+        void startUpdateChecker() {
+            updateChecker_ = new UpdateChecker(this);
+            connect(updateChecker_, &UpdateChecker::UpdateAvailable, this, [this](const QString &ver) {
+                if (ver.isEmpty()) {
+                    QMessageBox::information(this, "Check for Update", "You already have the latest version.");
+                    return;
+                }
+                QMessageBox box(QMessageBox::Information, "Update Available",
+                                 "kubewatch " + ver + " is available. You are running " + QString(APP_VERSION) + ".",
+                                 QMessageBox::NoButton, this);
+                box.addButton(QMessageBox::Close);
+                QPushButton *downloadButton = box.addButton("Download", QMessageBox::ActionRole);
+                box.exec();
+                if (box.clickedButton() == downloadButton) {
+                    QDesktopServices::openUrl(QUrl("https://jensvogt.github.io/kubewatch/"));
+                }
+            });
+            updateChecker_->checkForUpdatesNoNotification();
+
+            auto *updateTimer = new QTimer(this);
+            const int intervalSeconds = Configuration::instance().GetValue<int>("general.update-check-period", 24 * 3600);
+            updateTimer->setInterval(intervalSeconds * 1000);
+            connect(updateTimer, &QTimer::timeout, this, [this] { updateChecker_->checkForUpdatesNoNotification(); });
+            updateTimer->start();
+        }
+
         [[nodiscard]]
         QStringList baseArgs() const { return {"--kubeconfig", kKubeconfig, "--context", contextBox_->currentText()}; }
 
@@ -723,6 +850,9 @@ namespace {
                 } else if (kind == PageKind::Ingresses) {
                     connect(pageable, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showIngressDetailsForRow(pageIndex, index); });
+                } else if (kind == PageKind::Nodes) {
+                    connect(pageable, &PageableTable::DoubleClicked, this,
+                            [this, pageIndex](const QModelIndex &index) { showNodeDetailsForRow(pageIndex, index); });
                 }
             }
 
@@ -771,6 +901,11 @@ namespace {
         }
 
         void loadNamespaces() const {
+            // Clearing/repopulating the combo changes its current index as a side effect,
+            // which would otherwise fire onNamespaceChanged (and a spurious extra page
+            // refresh) for each such change -- callers already trigger their own single
+            // deliberate refresh once this returns.
+            const QSignalBlocker blocker(namespaceBox_);
             namespaceBox_->clear();
             namespaceBox_->addItem("All namespaces");
             QStringList args = baseArgs();
@@ -780,11 +915,16 @@ namespace {
             }
         }
 
-        void onContextChanged() const {
+        void onContextChanged() {
             Configuration::instance().SetValue("ui.last-context", contextBox_->currentText());
-            loadNamespaces();
-            updateActiveAwsCredentials();
-            refreshCurrentPage();
+            // showLoginDialog() already refreshes credentials/namespaces/the current page
+            // on success; only do it here as a fallback if login was cancelled or failed,
+            // so switching context doesn't leave stale data on screen either way.
+            if (!showLoginDialog()) {
+                updateActiveAwsCredentials();
+                loadNamespaces();
+                refreshCurrentPage();
+            }
         }
 
         // Derives which OneLogin/AWS account ("int" or "prod") the currently selected
@@ -1004,6 +1144,10 @@ namespace {
             if (!table) return;
             QElapsedTimer timer;
             timer.start();
+            // Both kubectl calls below are gathered under one guard so the busy overlay
+            // shows/hides at most once for the pair, instead of potentially flickering
+            // between them (each kubectl call otherwise manages the overlay on its own).
+            BusyGuard busyGuard;
             QStringList args = baseArgs();
             args << "get" << "nodes" << "-o" << "json";
             const QJsonArray items = fetchItems(args);
@@ -1016,7 +1160,7 @@ namespace {
             for (const auto &podValue: fetchItems(podArgs)) {
                 const QJsonObject pod = podValue.toObject();
                 const QString nodeName = pod["spec"].toObject()["nodeName"].toString();
-                if (nodeName.isEmpty()) continue;
+                if (nodeName.isEmpty() || isTerminatedPodPhase(pod["status"].toObject()["phase"].toString())) continue;
 
                 ++podCountByNode[nodeName];
                 for (const auto &containerValue: pod["spec"].toObject()["containers"].toArray()) {
@@ -2006,6 +2150,222 @@ namespace {
             dialog.exec();
         }
 
+        void showNodeDetailsForRow(int pageIndex, const QModelIndex &index) {
+            auto *table = qobject_cast<PageableTable *>(pages_->widget(pageIndex));
+            if (!table || !index.isValid()) return;
+
+            const auto name = table->GetValue<QString>(index, 0);
+            showNodeDetails(name);
+        }
+
+        void showNodeDetails(const QString &name) {
+            QJsonObject node;
+            QJsonArray pods;
+            QJsonArray events;
+            {
+                BusyGuard busyGuard;
+                QStringList getArgs = baseArgs();
+                getArgs << "get" << "nodes" << name << "-o" << "json";
+                const KubectlResult nodeResult = runKubectlCommand(getArgs);
+                if (!nodeResult.success) {
+                    QMessageBox::warning(this, "Node details failed", nodeResult.error);
+                    return;
+                }
+                node = QJsonDocument::fromJson(nodeResult.output.toUtf8()).object();
+
+                QStringList podArgs = baseArgs();
+                podArgs << "get" << "pods" << "--all-namespaces" << "--field-selector" << "spec.nodeName=" + name << "-o" << "json";
+                // Excludes Succeeded/Failed pods (e.g. completed Job pods still lingering
+                // on the node) to match kubectl describe node / the Kubernetes Dashboard.
+                for (const auto &podValue: fetchItems(podArgs)) {
+                    if (!isTerminatedPodPhase(podValue.toObject()["status"].toObject()["phase"].toString())) {
+                        pods.append(podValue);
+                    }
+                }
+
+                QStringList eventArgs = baseArgs();
+                eventArgs << "get" << "events" << "--all-namespaces" << "--field-selector"
+                          << "involvedObject.name=" + name + ",involvedObject.kind=Node" << "-o" << "json";
+                events = fetchItems(eventArgs);
+            }
+
+            const QJsonObject metadata = node["metadata"].toObject();
+            const QJsonObject spec = node["spec"].toObject();
+            const QJsonObject status = node["status"].toObject();
+            const QJsonObject nodeInfo = status["nodeInfo"].toObject();
+            const QJsonObject capacity = status["capacity"].toObject();
+            const QJsonObject allocatable = status["allocatable"].toObject();
+
+            QDialog dialog(this);
+            dialog.setWindowTitle("Node: " + name);
+            dialog.resize(1200, 900);
+
+            auto *content = new QWidget();
+            auto *layout = new QVBoxLayout(content);
+
+            auto *metaBox = new QGroupBox("Metadata");
+            auto *metaForm = new QFormLayout(metaBox);
+            metaForm->addRow("Name", new QLabel(metadata["name"].toString()));
+            metaForm->addRow("Created", new QLabel(formatCreated(metadata["creationTimestamp"].toString())));
+            metaForm->addRow("Age", new QLabel(computeAge(metadata["creationTimestamp"].toString())));
+            metaForm->addRow("UID", new QLabel(metadata["uid"].toString()));
+            auto *labelsValue = new QLabel(joinKeyValues(metadata["labels"].toObject()));
+            labelsValue->setWordWrap(true);
+            metaForm->addRow("Labels", labelsValue);
+            auto *annotationsValue = new QLabel(joinKeyValues(metadata["annotations"].toObject()));
+            annotationsValue->setWordWrap(true);
+            metaForm->addRow("Annotations", annotationsValue);
+            layout->addWidget(metaBox);
+
+            auto *resourceBox = new QGroupBox("Resource information");
+            auto *resourceForm = new QFormLayout(resourceBox);
+            resourceForm->addRow("Provider ID", new QLabel(spec["providerID"].toString()));
+            QStringList addresses;
+            for (const auto &addressValue: status["addresses"].toArray()) {
+                const QJsonObject address = addressValue.toObject();
+                addresses << address["type"].toString() + ": " + address["address"].toString();
+            }
+            auto *addressesLabel = new QLabel(addresses.isEmpty() ? "-" : addresses.join("\n"));
+            addressesLabel->setWordWrap(true);
+            resourceForm->addRow("Addresses", addressesLabel);
+            layout->addWidget(resourceBox);
+
+            auto *systemBox = new QGroupBox("System information");
+            auto *systemForm = new QFormLayout(systemBox);
+            systemForm->addRow("Machine ID", new QLabel(nodeInfo["machineID"].toString()));
+            systemForm->addRow("System UUID", new QLabel(nodeInfo["systemUUID"].toString()));
+            systemForm->addRow("Boot ID", new QLabel(nodeInfo["bootID"].toString()));
+            systemForm->addRow("Kernel Version", new QLabel(nodeInfo["kernelVersion"].toString()));
+            systemForm->addRow("OS Image", new QLabel(nodeInfo["osImage"].toString()));
+            systemForm->addRow("Container Runtime Version", new QLabel(nodeInfo["containerRuntimeVersion"].toString()));
+            systemForm->addRow("Kubelet Version", new QLabel(nodeInfo["kubeletVersion"].toString()));
+            systemForm->addRow("Operating System", new QLabel(nodeInfo["operatingSystem"].toString()));
+            systemForm->addRow("Architecture", new QLabel(nodeInfo["architecture"].toString()));
+            systemForm->addRow("CPU Capacity", new QLabel(capacity["cpu"].toString()));
+            systemForm->addRow("Memory Capacity", new QLabel(formatMemoryGiB(parseMemoryBytes(capacity["memory"].toString()))));
+            systemForm->addRow("Pods Capacity", new QLabel(capacity["pods"].toString()));
+            layout->addWidget(systemBox);
+
+            qint64 cpuRequestMillis = 0, cpuLimitMillis = 0;
+            qint64 memRequestBytes = 0, memLimitBytes = 0;
+            for (const auto &podValue: pods) {
+                for (const auto &containerValue: podValue.toObject()["spec"].toObject()["containers"].toArray()) {
+                    const QJsonObject resources = containerValue.toObject()["resources"].toObject();
+                    cpuRequestMillis += parseCpuMillis(resources["requests"].toObject()["cpu"].toString());
+                    cpuLimitMillis += parseCpuMillis(resources["limits"].toObject()["cpu"].toString());
+                    memRequestBytes += parseMemoryBytes(resources["requests"].toObject()["memory"].toString());
+                    memLimitBytes += parseMemoryBytes(resources["limits"].toObject()["memory"].toString());
+                }
+            }
+            const qint64 cpuCapacityMillis = parseCpuMillis(allocatable["cpu"].toString());
+            const qint64 memCapacityBytes = parseMemoryBytes(allocatable["memory"].toString());
+            const int podsCapacity = allocatable["pods"].toString().toInt();
+
+            const double cpuRequestPct = cpuCapacityMillis > 0 ? 100.0 * static_cast<double>(cpuRequestMillis) / static_cast<double>(cpuCapacityMillis) : 0.0;
+            const double cpuLimitPct = cpuCapacityMillis > 0 ? 100.0 * static_cast<double>(cpuLimitMillis) / static_cast<double>(cpuCapacityMillis) : 0.0;
+            const double memRequestPct = memCapacityBytes > 0 ? 100.0 * static_cast<double>(memRequestBytes) / static_cast<double>(memCapacityBytes) : 0.0;
+            const double memLimitPct = memCapacityBytes > 0 ? 100.0 * static_cast<double>(memLimitBytes) / static_cast<double>(memCapacityBytes) : 0.0;
+            const double podsPct = podsCapacity > 0 ? 100.0 * pods.size() / podsCapacity : 0.0;
+
+            auto *allocationBox = new QGroupBox("Allocation");
+            auto *allocationLayout = new QHBoxLayout(allocationBox);
+            allocationLayout->addStretch();
+            allocationLayout->addWidget(makeAllocationColumn("CPU", {
+                new PercentageRing(cpuRequestPct, "Requests", QString("Cores: %1").arg(cpuRequestMillis / 1000.0, 0, 'f', 2)),
+                new PercentageRing(cpuLimitPct, "Limits", QString("Cores: %1").arg(cpuLimitMillis / 1000.0, 0, 'f', 2)),
+            }));
+            allocationLayout->addStretch();
+            allocationLayout->addWidget(makeAllocationColumn("Memory", {
+                new PercentageRing(memRequestPct, "Requests", QString("GiB: %1").arg(memRequestBytes / (1024.0 * 1024 * 1024), 0, 'f', 1)),
+                new PercentageRing(memLimitPct, "Limits", QString("GiB: %1").arg(memLimitBytes / (1024.0 * 1024 * 1024), 0, 'f', 1)),
+            }));
+            allocationLayout->addStretch();
+            allocationLayout->addWidget(makeAllocationColumn("Pods", {
+                new PercentageRing(podsPct, "Allocation", QString("Pods: %1").arg(pods.size())),
+            }));
+            allocationLayout->addStretch();
+            layout->addWidget(allocationBox);
+
+            auto *conditionsBox = new QGroupBox("Conditions");
+            auto *conditionsLayout = new QVBoxLayout(conditionsBox);
+            auto *conditionsTable = makeDetailTable({"Type", "Status", "Last Probe", "Last Transition", "Reason", "Message"});
+            const QJsonArray conditions = status["conditions"].toArray();
+            conditionsTable->setRowCount(conditions.size());
+            for (int i = 0; i < conditions.size(); ++i) {
+                const QJsonObject condition = conditions[i].toObject();
+                conditionsTable->setItem(i, 0, new QTableWidgetItem(condition["type"].toString()));
+                conditionsTable->setItem(i, 1, new QTableWidgetItem(condition["status"].toString()));
+                conditionsTable->setItem(i, 2, new QTableWidgetItem(computeAge(condition["lastHeartbeatTime"].toString())));
+                conditionsTable->setItem(i, 3, new QTableWidgetItem(computeAge(condition["lastTransitionTime"].toString())));
+                conditionsTable->setItem(i, 4, new QTableWidgetItem(condition["reason"].toString()));
+                conditionsTable->setItem(i, 5, new QTableWidgetItem(condition["message"].toString()));
+            }
+            conditionsLayout->addWidget(conditionsTable);
+            layout->addWidget(conditionsBox);
+
+            auto *podsBox = new QGroupBox(QString("Pods (%1)").arg(pods.size()));
+            auto *podsLayout = new QVBoxLayout(podsBox);
+            if (pods.isEmpty()) {
+                auto *emptyLabel = new QLabel("There is nothing to display here\nNo resources found.");
+                emptyLabel->setAlignment(Qt::AlignCenter);
+                podsLayout->addWidget(emptyLabel);
+            } else {
+                auto *podsTable = makeDetailTable({"Name", "Images", "Labels", "Node", "Status", "Restarts", "CPU Usage (cores)",
+                                                    "Memory Usage (bytes)", "Created"});
+                podsTable->setRowCount(pods.size());
+                for (int i = 0; i < pods.size(); ++i) {
+                    const QJsonObject pod = pods[i].toObject();
+                    const QJsonObject podMeta = pod["metadata"].toObject();
+                    const QJsonObject podStatus = pod["status"].toObject();
+                    const QJsonObject podSpec = pod["spec"].toObject();
+
+                    QStringList images;
+                    for (const auto &containerValue: podSpec["containers"].toArray()) {
+                        images << containerValue.toObject()["image"].toString();
+                    }
+                    int restarts = 0;
+                    for (const auto &containerStatusValue: podStatus["containerStatuses"].toArray()) {
+                        restarts += containerStatusValue.toObject()["restartCount"].toInt();
+                    }
+
+                    podsTable->setItem(i, 0, new QTableWidgetItem(podMeta["name"].toString()));
+                    podsTable->setItem(i, 1, new QTableWidgetItem(images.join(", ")));
+                    podsTable->setItem(i, 2, new QTableWidgetItem(joinKeyValues(podMeta["labels"].toObject())));
+                    podsTable->setItem(i, 3, new QTableWidgetItem(podSpec["nodeName"].toString()));
+                    podsTable->setItem(i, 4, new QTableWidgetItem(podStatus["phase"].toString()));
+                    podsTable->setItem(i, 5, new QTableWidgetItem(QString::number(restarts)));
+                    podsTable->setItem(i, 6, new QTableWidgetItem("-"));
+                    podsTable->setItem(i, 7, new QTableWidgetItem("-"));
+                    podsTable->setItem(i, 8, new QTableWidgetItem(computeAge(podMeta["creationTimestamp"].toString())));
+                }
+                podsLayout->addWidget(podsTable);
+            }
+            layout->addWidget(podsBox);
+
+            auto *eventsBox = new QGroupBox(QString("Events (%1)").arg(events.size()));
+            auto *eventsLayout = new QVBoxLayout(eventsBox);
+            auto *eventsTable = makeDetailTable({"Type", "Reason", "Message", "Age"});
+            eventsTable->setRowCount(events.size());
+            for (int i = 0; i < events.size(); ++i) {
+                const QJsonObject event = events[i].toObject();
+                eventsTable->setItem(i, 0, new QTableWidgetItem(event["type"].toString()));
+                eventsTable->setItem(i, 1, new QTableWidgetItem(event["reason"].toString()));
+                eventsTable->setItem(i, 2, new QTableWidgetItem(event["message"].toString()));
+                eventsTable->setItem(i, 3, new QTableWidgetItem(computeAge(event["lastTimestamp"].toString())));
+            }
+            eventsLayout->addWidget(eventsTable);
+            layout->addWidget(eventsBox);
+
+            auto *scrollArea = new QScrollArea(&dialog);
+            scrollArea->setWidgetResizable(true);
+            scrollArea->setWidget(content);
+
+            auto *dialogLayout = new QVBoxLayout(&dialog);
+            dialogLayout->addWidget(scrollArea);
+
+            dialog.exec();
+        }
+
         // Shows a small dialog asking only for the authenticator token, and returns what
         // was typed (or an empty string if cancelled). Called by LoginWithOneLogin only
         // once the MFA challenge has actually arrived, so the code is submitted almost
@@ -2034,8 +2394,7 @@ namespace {
         // tool) also picks up the freshly-obtained session. Best-effort: a failure here
         // doesn't affect kubewatch's own kubectl calls, which already use the in-memory
         // credentials directly.
-        void updateExternalAwsConfig(const QString &accountKey, const AwsSessionCredentials &credentials,
-                                      const QString &contextName) const {
+        void updateExternalAwsConfig(const QString &accountKey, const AwsSessionCredentials &credentials, const QString &contextName) const {
             const QList<QStringList> setCalls = {
                 {"configure", "set", "aws_access_key_id", credentials.accessKeyId, "--profile", accountKey},
                 {"configure", "set", "aws_secret_access_key", credentials.secretAccessKey, "--profile", accountKey},
@@ -2079,7 +2438,10 @@ namespace {
             logInfo << "Updated kubeconfig user" << userName << "to use AWS profile" << accountKey;
         }
 
-        void showLoginDialog() {
+        // Returns true if login completed successfully (in which case credentials,
+        // namespaces and the current page have already been refreshed), false if the
+        // dialog was cancelled or login failed for any reason.
+        bool showLoginDialog() {
             QDialog dialog(this);
             dialog.setWindowTitle("OneLogin Sign In");
             dialog.setMinimumWidth(450);
@@ -2107,12 +2469,12 @@ namespace {
             connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
             connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
-            if (dialog.exec() != QDialog::Accepted) return;
+            if (dialog.exec() != QDialog::Accepted) return false;
 
             const QString selectedContext = contextCombo->currentText();
             if (selectedContext.isEmpty()) {
                 QMessageBox::warning(this, "Login", "No context selected.");
-                return;
+                return false;
             }
             // Switch the main window to the chosen context too, so the user ends up
             // browsing whatever cluster they just signed in for.
@@ -2124,7 +2486,7 @@ namespace {
             const QString password = passwordEdit->text();
             if (username.isEmpty() || password.isEmpty()) {
                 QMessageBox::warning(this, "Login", "Username and password are both required.");
-                return;
+                return false;
             }
 
             const QString accountKey = currentAwsAccountKey();
@@ -2132,7 +2494,7 @@ namespace {
             if (appId == 0) {
                 QMessageBox::warning(this, "Login",
                                       "No OneLogin app-id configured for account \"" + accountKey + "\".");
-                return;
+                return false;
             }
 
             AwsSessionCredentials credentials;
@@ -2145,17 +2507,20 @@ namespace {
 
             if (!credentials.isValid()) {
                 QMessageBox::warning(this, "Login failed", error.isEmpty() ? "Unknown error." : error);
-                return;
+                return false;
             }
 
             awsCredentialsByAccount_[accountKey] = credentials;
             updateActiveAwsCredentials();
+            loadNamespaces();
+            refreshCurrentPage();
             Configuration::instance().SetValue("onelogin.user", username);
             updateExternalAwsConfig(accountKey, credentials, selectedContext);
 
             QMessageBox::information(this, "Login",
                                       "Signed in for account \"" + accountKey + "\". Session valid until " +
                                           credentials.expiresAt.toLocalTime().toString("yyyy-MM-dd HH:mm:ss") + ".");
+            return true;
         }
 
         QComboBox *contextBox_;
@@ -2168,6 +2533,7 @@ namespace {
         QTreeWidgetItem *nodesItem_ = nullptr;
         std::vector<ResourceSpec> specs_;
         QMap<QString, AwsSessionCredentials> awsCredentialsByAccount_;
+        UpdateChecker *updateChecker_ = nullptr;
     };
 }
 

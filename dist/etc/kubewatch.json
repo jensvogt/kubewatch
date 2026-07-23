@@ -1,4 +1,7 @@
 {
+  "general": {
+    "update-check-period": 86400
+  },
   "ui": {
     "busy-indicator-delay-ms": 500,
     "last-context": "arn:aws:eks:eu-central-1:012096702153:cluster/pim-prod-eks",

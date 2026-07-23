@@ -13,6 +13,8 @@ env:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
+  pages: write
 
 jobs:
   release-please:
@@ -119,6 +121,23 @@ jobs:
         with:
           name: installer-windows
           path: installer/${{ env.APP_NAME }}-${{ env.SEMVER }}-windows.exe
+
+      - name: Generate repository
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ifwRoot = Get-ChildItem "$env:QT_DIR\Tools\QtInstallerFramework" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $ifwRoot) { Write-Error "IFW not found"; exit 1 }
+          $ifwBin = Join-Path $ifwRoot.FullName "bin"
+          $env:PATH = "$ifwBin;$env:PATH"
+          repogen -p installer/packages installer/repository
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload repository artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository
+          path: installer/repository
 
   build-macos:
     name: Build & Package (macOS)
@@ -347,6 +366,12 @@ jobs:
           name: rpm-package-linux
           path: artifacts/linux
 
+      - name: Download update repository
+        uses: actions/download-artifact@v4
+        with:
+          name: repository
+          path: artifacts/repository
+
       - name: Create GitHub Release (attach installers)
         uses: softprops/action-gh-release@v2
         with:
@@ -355,8 +380,66 @@ jobs:
             artifacts/macos/*.dmg
             artifacts/linux/*.deb
             artifacts/linux/*.rpm
+            artifacts/repository/*
           name: Release ${{ env.SEMVER }}
           tag_name: ${{ env.SEMVER }}
           body: "Automated release for ${{ env.SEMVER }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    name: Publish GitHub Pages
+    needs:
+      - publish
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create site folder
+        run: |
+          mkdir public
+          cp ./artifacts/installer-windows/*.exe public/ || true
+          cp ./artifacts/installer-macos/*.dmg public/ || true
+          cp ./artifacts/deb-package-linux/*.deb public/ || true
+          cp ./artifacts/rpm-package-linux/*.rpm public/ || true
+          cp -r ./artifacts/repository/* public/ || true
+          cp .github/pages/index.html public/index.html || true
+          cp version.txt public/version.txt || true
+
+      - name: Generate files.json
+        run: |
+          cd public
+          echo '{ "downloads": [' > files.json
+          first=true
+          for f in *.{exe,deb,rpm,dmg}; do
+            [ -f "$f" ] || continue
+            if [ "$first" = true ]; then
+              first=false
+            else
+              echo "," >> files.json
+            fi
+            size=$(stat -c%s "$f")
+            sha=$(sha256sum "$f" | cut -d" " -f1)
+            echo "  {\"file\": \"$f\", \"size\": $size, \"sha256\": \"$sha\"}" >> files.json
+          done
+          echo "]}" >> files.json
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

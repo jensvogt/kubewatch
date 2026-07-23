@@ -4,6 +4,10 @@ include(cmake/ReadVersion.cmake)
 
 project(kubewatch VERSION ${VERSION_STRING})
 
+# Export version to source code (used by UpdateChecker to compare against version.txt
+# published on GitHub Pages)
+configure_file(${CMAKE_SOURCE_DIR}/cmake/version.h.in ${CMAKE_SOURCE_DIR}/include/Version.h)
+
 # Generate installer config/package XML from their .in templates
 file(READ "${CMAKE_SOURCE_DIR}/installer/config/config.xml.in" _CONFIG_XML)
 string(REPLACE "@VERSION_STRING@" "${VERSION_STRING}" _CONFIG_XML "${_CONFIG_XML}")
@@ -46,6 +50,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         include/utils/Logging.h
         include/onelogin/OneLoginAuth.h
         src/onelogin/OneLoginAuth.cpp
+        include/Version.h
+        include/utils/UpdateChecker.h
 )
 target_include_directories(kubewatch PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
