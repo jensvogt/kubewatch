@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/icons">
-        <file>common/awsmock.png</file>
+        <file>common/kubewatch.png</file>
+        <file>common/kubewatch.ico</file>
         <file>light/about.svg</file>
         <file>light/add.svg</file>
         <file>light/add-directory.svg</file>
