@@ -53,10 +53,45 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/utils/PrefixFilterModel.cpp
         include/utils/EventBus.h
         include/utils/Logging.h
+        include/utils/KubeFormat.h
+        src/utils/KubeFormat.cpp
         include/onelogin/OneLoginAuth.h
         src/onelogin/OneLoginAuth.cpp
         include/Version.h
         include/utils/UpdateChecker.h
+        include/kubectl/KubectlClient.h
+        src/kubectl/KubectlClient.cpp
+        include/tables/KubeTable.h
+        include/tables/GenericTable.h
+        src/tables/GenericTable.cpp
+        include/tables/PodsTable.h
+        src/tables/PodsTable.cpp
+        include/tables/JobsTable.h
+        src/tables/JobsTable.cpp
+        include/tables/ServicesTable.h
+        src/tables/ServicesTable.cpp
+        include/tables/NodesTable.h
+        src/tables/NodesTable.cpp
+        include/tables/NamespacesTable.h
+        src/tables/NamespacesTable.cpp
+        include/dialogs/OtpDialog.h
+        src/dialogs/OtpDialog.cpp
+        include/dialogs/LoginDialog.h
+        src/dialogs/LoginDialog.cpp
+        include/dialogs/EditResourceDialog.h
+        src/dialogs/EditResourceDialog.cpp
+        include/dialogs/LogsDialog.h
+        src/dialogs/LogsDialog.cpp
+        include/dialogs/JobDetailsDialog.h
+        src/dialogs/JobDetailsDialog.cpp
+        include/dialogs/PodDetailsDialog.h
+        src/dialogs/PodDetailsDialog.cpp
+        include/dialogs/ServiceDetailsDialog.h
+        src/dialogs/ServiceDetailsDialog.cpp
+        include/dialogs/IngressDetailsDialog.h
+        src/dialogs/IngressDetailsDialog.cpp
+        include/dialogs/NodeDetailsDialog.h
+        src/dialogs/NodeDetailsDialog.cpp
 )
 target_include_directories(kubewatch PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
