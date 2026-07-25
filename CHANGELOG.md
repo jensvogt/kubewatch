@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.6](https://github.com/jensvogt/kubewatch/compare/1.3.5...1.3.6) (2026-07-25)
+
+
+### Bug Fixes
+
+* new structure, login dialog ([410e38e](https://github.com/jensvogt/kubewatch/commit/410e38e183c568f1d2c1bfdaed8a661a9f2a32ab))
+
 ## [1.3.5](https://github.com/jensvogt/kubewatch/compare/1.3.4...1.3.5) (2026-07-24)
 
 
