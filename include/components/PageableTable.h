@@ -80,6 +80,14 @@ public:
     void SetHiddenColumns(const QList<int> &hiddenColumns) const;
 
     /**
+     * @brief Visually moves a column to the leftmost position, leaving its
+     * logical index (and therefore sorting/selection/lookup behavior) unchanged.
+     *
+     * @param logicalColumn logical column index to move to the front
+     */
+    void MoveColumnToFront(int logicalColumn) const;
+
+    /**
      * @brief Sets the total size
      *
      * @param totalSize total item count
@@ -228,6 +236,17 @@ public:
      * @param disabledIcon icon to how when value = false
      */
     void SetColumn(int row, int column, bool value, const QIcon &enabledIcon, const QIcon &disabledIcon) const;
+
+    /**
+     * @brief Sets an icon-only column
+     *
+     * @param row table row
+     * @param column table column
+     * @param icon icon to display
+     * @param sortRank underlying value used for sorting/tooltip logic
+     * @param tooltip optional tooltip text
+     */
+    void SetColumn(int row, int column, const QIcon &icon, long sortRank = 0, const QString &tooltip = {}) const;
 
     /**
      * @brief Sets a placeholder text for the search field

@@ -55,6 +55,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         include/utils/Logging.h
         include/utils/KubeFormat.h
         src/utils/KubeFormat.cpp
+        include/utils/HealthLight.h
+        src/utils/HealthLight.cpp
         include/onelogin/OneLoginAuth.h
         src/onelogin/OneLoginAuth.cpp
         include/Version.h
@@ -66,6 +68,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/tables/GenericTable.cpp
         include/tables/PodsTable.h
         src/tables/PodsTable.cpp
+        include/tables/DeploymentsTable.h
+        src/tables/DeploymentsTable.cpp
         include/tables/JobsTable.h
         src/tables/JobsTable.cpp
         include/tables/ServicesTable.h
@@ -84,6 +88,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/dialogs/LogsDialog.cpp
         include/dialogs/JobDetailsDialog.h
         src/dialogs/JobDetailsDialog.cpp
+        include/dialogs/DeploymentDetailsDialog.h
+        src/dialogs/DeploymentDetailsDialog.cpp
         include/dialogs/PodDetailsDialog.h
         src/dialogs/PodDetailsDialog.cpp
         include/dialogs/ServiceDetailsDialog.h
