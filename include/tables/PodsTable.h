@@ -14,5 +14,6 @@ public:
     [[nodiscard]] bool SupportsLogs() const override { return true; }
 
 private:
-    static constexpr int kNamespaceColumn = 5;
+    static constexpr int kHealthColumn = 5;
+    static constexpr int kNamespaceColumn = 6;
 };

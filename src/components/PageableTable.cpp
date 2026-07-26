@@ -229,6 +229,22 @@ void PageableTable::SetColumn(const int row, const int column, const bool value,
     //_dataModel->setData(index, value ? Qt::Checked : Qt::Unchecked, Qt::CheckStateRole);
 }
 
+void PageableTable::MoveColumnToFront(const int logicalColumn) const {
+    QHeaderView *header = _ui->tableView->horizontalHeader();
+    header->moveSection(header->visualIndex(logicalColumn), 0);
+}
+
+void PageableTable::SetColumn(const int row, const int column, const QIcon &icon, const long sortRank, const QString &tooltip) const {
+    const QModelIndex index = _dataModel->index(row, column);
+    _dataModel->setData(index, icon, Qt::DecorationRole);
+    _dataModel->setData(index, static_cast<qlonglong>(sortRank), Qt::UserRole);
+    _dataModel->setData(index, "", Qt::DisplayRole);
+    _dataModel->setData(index, QVariant(Qt::AlignCenter), Qt::TextAlignmentRole);
+    if (!tooltip.isEmpty()) {
+        _dataModel->setData(index, tooltip, Qt::ToolTipRole);
+    }
+}
+
 void PageableTable::SetHiddenColumn(const int row, const int column, const QString &value) const {
     const auto item = new QStandardItem(value);
     item->setData(value, Qt::EditRole);

@@ -42,11 +42,13 @@
 #include <dialogs/JobDetailsDialog.h>
 #include <dialogs/LoginDialog.h>
 #include <dialogs/LogsDialog.h>
+#include <dialogs/DeploymentDetailsDialog.h>
 #include <dialogs/NodeDetailsDialog.h>
 #include <dialogs/PodDetailsDialog.h>
 #include <dialogs/ServiceDetailsDialog.h>
 #include <kubectl/KubectlClient.h>
 #include <onelogin/OneLoginAuth.h>
+#include <tables/DeploymentsTable.h>
 #include <tables/GenericTable.h>
 #include <tables/JobsTable.h>
 #include <tables/KubeTable.h>
@@ -82,7 +84,7 @@ namespace {
 } // namespace
 
 namespace {
-    enum class PageKind { Placeholder, Generic, Pods, Jobs, Services, Ingresses, Nodes, Namespaces, Settings };
+    enum class PageKind { Placeholder, Generic, Pods, Deployments, Jobs, Services, Ingresses, Nodes, Namespaces, Settings };
 
     class MainWindow : public QMainWindow {
     public:
@@ -280,6 +282,9 @@ namespace {
                 case PageKind::Pods:
                     page = new PodsTable();
                     break;
+                case PageKind::Deployments:
+                    page = new DeploymentsTable();
+                    break;
                 case PageKind::Jobs:
                     page = new JobsTable();
                     break;
@@ -308,6 +313,9 @@ namespace {
                 } else if (kind == PageKind::Pods) {
                     connect(table, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showPodDetailsForRow(pageIndex, index); });
+                } else if (kind == PageKind::Deployments) {
+                    connect(table, &PageableTable::DoubleClicked, this,
+                            [this, pageIndex](const QModelIndex &index) { showDeploymentDetailsForRow(pageIndex, index); });
                 } else if (kind == PageKind::Services) {
                     connect(table, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showServiceDetailsForRow(pageIndex, index); });
@@ -330,7 +338,7 @@ namespace {
 
             auto *workloads = new QTreeWidgetItem(tree_, {"Workloads"});
             addLeaf(workloads, "Pods", PageKind::Pods, "pods");
-            addLeaf(workloads, "Deployments", PageKind::Generic, "deployments");
+            addLeaf(workloads, "Deployments", PageKind::Deployments, "deployments");
             addLeaf(workloads, "StatefulSets", PageKind::Generic, "statefulsets");
             addLeaf(workloads, "DaemonSets", PageKind::Generic, "daemonsets");
             addLeaf(workloads, "Jobs", PageKind::Jobs, "jobs");
@@ -509,6 +517,14 @@ namespace {
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
             PodDetailsDialog::Show(this, baseArgs(), name, ns);
+        }
+
+        void showDeploymentDetailsForRow(int pageIndex, const QModelIndex &index) {
+            auto *table = qobject_cast<KubeTable *>(pages_->widget(pageIndex));
+            if (!table || !index.isValid()) return;
+            const auto name = table->GetValue<QString>(index, 0);
+            const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
+            DeploymentDetailsDialog::Show(this, baseArgs(), name, ns);
         }
 
         void showServiceDetailsForRow(int pageIndex, const QModelIndex &index) {
