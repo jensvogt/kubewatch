@@ -98,6 +98,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/dialogs/IngressDetailsDialog.cpp
         include/dialogs/NodeDetailsDialog.h
         src/dialogs/NodeDetailsDialog.cpp
+        include/dialogs/NamespaceDetailsDialog.h
+        src/dialogs/NamespaceDetailsDialog.cpp
 )
 target_include_directories(kubewatch PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
