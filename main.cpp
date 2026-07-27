@@ -43,6 +43,7 @@
 #include <dialogs/LoginDialog.h>
 #include <dialogs/LogsDialog.h>
 #include <dialogs/DeploymentDetailsDialog.h>
+#include <dialogs/NamespaceDetailsDialog.h>
 #include <dialogs/NodeDetailsDialog.h>
 #include <dialogs/PodDetailsDialog.h>
 #include <dialogs/ServiceDetailsDialog.h>
@@ -325,6 +326,9 @@ namespace {
                 } else if (kind == PageKind::Nodes) {
                     connect(table, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showNodeDetailsForRow(pageIndex, index); });
+                } else if (kind == PageKind::Namespaces) {
+                    connect(table, &PageableTable::DoubleClicked, this,
+                            [this, pageIndex](const QModelIndex &index) { showNamespaceDetailsForRow(pageIndex, index); });
                 }
             }
 
@@ -548,6 +552,13 @@ namespace {
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
             NodeDetailsDialog::Show(this, baseArgs(), name);
+        }
+
+        void showNamespaceDetailsForRow(int pageIndex, const QModelIndex &index) {
+            auto *table = qobject_cast<KubeTable *>(pages_->widget(pageIndex));
+            if (!table || !index.isValid()) return;
+            const auto name = table->GetValue<QString>(index, 0);
+            NamespaceDetailsDialog::Show(this, baseArgs(), name);
         }
 
         // Writes the new session credentials to ~/.aws/credentials under a profile named
