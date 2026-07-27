@@ -163,3 +163,36 @@ if (WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>")
     endforeach (QT_LIB)
 endif ()
+
+if (UNIX AND NOT APPLE)
+    # Packaged layout (deb/rpm) ships Qt's .so files in ../lib next to the
+    # binary; $ORIGIN/../lib lets the binary find them without LD_LIBRARY_PATH.
+    # This is additive to CMake's automatic build-tree RPATH, so local builds
+    # still resolve Qt from the SDK used to configure them.
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+            BUILD_RPATH "$ORIGIN/../lib"
+    )
+
+    set(QT_PLUGINS_PATH "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}")
+
+    foreach (QT_PLUGIN
+            platforms/libqxcb.so
+            iconengines/libqsvgicon.so
+            tls/libqopensslbackend.so
+            tls/libqcertonlybackend.so)
+        if (EXISTS "${QT_PLUGINS_PATH}/${QT_PLUGIN}")
+            get_filename_component(QT_PLUGIN_DIR "${QT_PLUGIN}" DIRECTORY)
+            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugins/${QT_PLUGIN_DIR}/")
+            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy
+                    "${QT_PLUGINS_PATH}/${QT_PLUGIN}"
+                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugins/${QT_PLUGIN_DIR}/")
+        endif ()
+    endforeach ()
+
+    # Without this, Qt falls back to the plugin path baked in at Qt-build time,
+    # which does not exist on a machine that only has the bundled plugins/ dir.
+    file(GENERATE OUTPUT "$<TARGET_FILE_DIR:${PROJECT_NAME}>/qt.conf" CONTENT "[Paths]\nPlugins = plugins\n")
+endif ()

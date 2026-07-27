@@ -257,6 +257,7 @@ jobs:
           cp -r $QT_ROOT_DIR/lib/* $PACKAGE_DIR/usr/local/$APP_NAME/lib/
           cp -r $QT_ROOT_DIR/plugins/platforms $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
           cp -r $QT_ROOT_DIR/plugins/iconengines $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
+          cp -r $QT_ROOT_DIR/plugins/tls $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
           cp dist/etc/kubewatch.desktop $PACKAGE_DIR/usr/share/applications/
 
           cat << EOF > $PACKAGE_DIR/usr/local/$APP_NAME/bin/qt.conf
@@ -320,6 +321,7 @@ jobs:
           cp -r $QT_ROOT_DIR/lib/* $PACKAGE_DIR/usr/local/$APP_NAME/lib/
           cp -r $QT_ROOT_DIR/plugins/platforms $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
           cp -r $QT_ROOT_DIR/plugins/iconengines $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
+          cp -r $QT_ROOT_DIR/plugins/tls $PACKAGE_DIR/usr/local/$APP_NAME/plugins/
 
           cat << EOF > $PACKAGE_DIR/usr/local/$APP_NAME/bin/qt.conf
           [Paths]
