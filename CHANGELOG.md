@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.10](https://github.com/jensvogt/kubewatch/compare/1.3.9...1.3.10) (2026-07-27)
+
+
+### Bug Fixes
+
+* linux port: add plugin ([90d17a2](https://github.com/jensvogt/kubewatch/commit/90d17a2db55ec43f36c002437b776a43df13933d))
+
 ## [1.3.9](https://github.com/jensvogt/kubewatch/compare/1.3.8...1.3.9) (2026-07-27)
 
 
