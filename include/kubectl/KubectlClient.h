@@ -15,6 +15,8 @@
 // Awsmock includes
 #include <onelogin/OneLoginAuth.h>
 
+#include <functional>
+
 // Circular indeterminate progress indicator: a rotating partial ring, redrawn on a timer.
 class SpinnerWidget : public QWidget {
 public:
@@ -56,6 +58,14 @@ namespace KubectlClient {
     // kubectl's process environment so its exec-based auth plugin picks them up.
     void SetActiveAwsCredentials(const AwsSessionCredentials &credentials);
     const AwsSessionCredentials &ActiveAwsCredentials();
+
+    // Invoked synchronously by runKubectlCommand, immediately before running kubectl,
+    // whenever the active AWS session (set via SetActiveAwsCredentials) has expired.
+    // Expected to show a relogin dialog and install fresh credentials via
+    // SetActiveAwsCredentials before returning; returns true if the call should now
+    // proceed, false to abort it (e.g. the user cancelled).
+    using ReloginHandler = std::function<bool()>;
+    void SetReloginHandler(ReloginHandler handler);
 
     int busyIndicatorDelayMs();
 

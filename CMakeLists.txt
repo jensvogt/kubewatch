@@ -82,6 +82,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/dialogs/OtpDialog.cpp
         include/dialogs/LoginDialog.h
         src/dialogs/LoginDialog.cpp
+        include/dialogs/ReloginDialog.h
+        src/dialogs/ReloginDialog.cpp
         include/dialogs/EditResourceDialog.h
         src/dialogs/EditResourceDialog.cpp
         include/dialogs/LogsDialog.h
