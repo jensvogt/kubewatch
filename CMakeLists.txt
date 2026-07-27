@@ -163,6 +163,14 @@ if (WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
 endif ()
 
 if (UNIX AND NOT APPLE)
+    # Packaged layout (deb/rpm) ships Qt's .so files in ../lib next to the
+    # binary; $ORIGIN/../lib lets the binary find them without LD_LIBRARY_PATH.
+    # This is additive to CMake's automatic build-tree RPATH, so local builds
+    # still resolve Qt from the SDK used to configure them.
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+            BUILD_RPATH "$ORIGIN/../lib"
+    )
+
     set(QT_PLUGINS_PATH "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}")
 
     foreach (QT_PLUGIN
