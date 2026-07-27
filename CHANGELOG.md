@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.8](https://github.com/jensvogt/kubewatch/compare/1.3.7...1.3.8) (2026-07-27)
+
+
+### Bug Fixes
+
+* namespace dialog ([93d2dfa](https://github.com/jensvogt/kubewatch/commit/93d2dfa0a1bfd67616d9d3549f5c79021bffc1b9))
+* namespace dialog ([60ac5c9](https://github.com/jensvogt/kubewatch/commit/60ac5c9412487f880e835c1ed93ee50411acb24a))
+
 ## [1.3.7](https://github.com/jensvogt/kubewatch/compare/1.3.6...1.3.7) (2026-07-26)
 
 
