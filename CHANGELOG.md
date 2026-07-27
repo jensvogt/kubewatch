@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.7](https://github.com/jensvogt/kubewatch/compare/1.3.6...1.3.7) (2026-07-26)
+
+
+### Bug Fixes
+
+* new deployment dialog, traffic light ([dcb01db](https://github.com/jensvogt/kubewatch/commit/dcb01dbb7792b711203744a8b0a9966c0dff0a00))
+* new deployment dialog, traffic light ([30f691c](https://github.com/jensvogt/kubewatch/commit/30f691ce43ec1eb019c0d462488f66a81535f908))
+
 ## [1.3.6](https://github.com/jensvogt/kubewatch/compare/1.3.5...1.3.6) (2026-07-25)
 
 
