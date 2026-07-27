@@ -57,6 +57,7 @@ void BusyOverlay::showOverParent() {
 namespace {
     BusyOverlay *g_busyOverlay = nullptr;
     AwsSessionCredentials g_activeAwsCredentials;
+    KubectlClient::ReloginHandler g_reloginHandler;
 
     // Number of busy scopes/calls currently in flight. The overlay is only actually
     // hidden once this drops back to zero, so a sequence of kubectl calls nested
@@ -88,11 +89,25 @@ namespace KubectlClient {
         return g_activeAwsCredentials;
     }
 
+    void SetReloginHandler(ReloginHandler handler) {
+        g_reloginHandler = std::move(handler);
+    }
+
     int busyIndicatorDelayMs() {
         return Configuration::instance().GetValue<int>("ui.busy-indicator-delay-ms", 500);
     }
 
     KubectlResult runKubectlCommand(const QStringList &args, const QString &stdinData) {
+        // A non-empty but expired credential set means this context was signed in via
+        // OneLogin at some point and that session has since lapsed -- prompt for a
+        // relogin before making a call that would otherwise fail with a stale token.
+        // Contexts that never used OneLogin (accessKeyId always empty) never hit this.
+        if (!g_activeAwsCredentials.accessKeyId.isEmpty() && !g_activeAwsCredentials.isValid() && g_reloginHandler) {
+            if (!g_reloginHandler()) {
+                return {false, {}, "AWS session expired; login cancelled."};
+            }
+        }
+
         logDebug << "kubectl" << args.join(' ');
         QProcess process;
         if (g_activeAwsCredentials.isValid()) {

@@ -15,8 +15,10 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMap>
+#include <QKeySequence>
 #include <QMainWindow>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPalette>
 #include <QProcess>
@@ -46,6 +48,7 @@
 #include <dialogs/NamespaceDetailsDialog.h>
 #include <dialogs/NodeDetailsDialog.h>
 #include <dialogs/PodDetailsDialog.h>
+#include <dialogs/ReloginDialog.h>
 #include <dialogs/ServiceDetailsDialog.h>
 #include <kubectl/KubectlClient.h>
 #include <onelogin/OneLoginAuth.h>
@@ -94,6 +97,9 @@ namespace {
             resize(1800, 1200);
 
             KubectlClient::SetBusyOverlay(new BusyOverlay(this));
+            KubectlClient::SetReloginHandler([this] { return showReloginDialog(); });
+
+            buildMenuBar();
 
             statusLabel_ = new QLabel("Last refresh: never");
             statusBar()->addPermanentWidget(statusLabel_);
@@ -221,6 +227,42 @@ namespace {
         }
 
     private:
+        void buildMenuBar() {
+            auto *fileMenu = menuBar()->addMenu("&File");
+
+            auto *refreshAction = fileMenu->addAction(IconUtils::GetIcon("refresh"), "&Refresh");
+            refreshAction->setShortcut(QKeySequence::Refresh);
+            connect(refreshAction, &QAction::triggered, this, &MainWindow::refreshCurrentPage);
+
+            auto *signInAction = fileMenu->addAction(IconUtils::GetIcon("connect"), "&Sign In...");
+            connect(signInAction, &QAction::triggered, this, [this] { showLoginDialog(); });
+
+            fileMenu->addSeparator();
+
+            auto *exitAction = fileMenu->addAction(IconUtils::GetIcon("exit"), "E&xit");
+            exitAction->setShortcut(QKeySequence::Quit);
+            connect(exitAction, &QAction::triggered, this, &QWidget::close);
+
+            auto *helpMenu = menuBar()->addMenu("&Help");
+
+            auto *updateAction = helpMenu->addAction(IconUtils::GetIcon("update"), "Check for &Updates...");
+            connect(updateAction, &QAction::triggered, this, [this] { updateChecker_->checkForUpdates(); });
+
+            auto *docsAction = helpMenu->addAction(IconUtils::GetIcon("help"), "&Documentation");
+            connect(docsAction, &QAction::triggered, this,
+                    [] { QDesktopServices::openUrl(QUrl("https://jensvogt.github.io/kubewatch/")); });
+
+            helpMenu->addSeparator();
+
+            auto *aboutAction = helpMenu->addAction(IconUtils::GetIcon("about"), "&About KubeWatch");
+            connect(aboutAction, &QAction::triggered, this, [this] {
+                QMessageBox::about(this, "About KubeWatch",
+                                    "<h3>KubeWatch " + QString(APP_VERSION) + "</h3>"
+                                    "<p>A native desktop client for browsing and managing Kubernetes clusters.</p>"
+                                    "<p>Kubeconfig: " + KubectlClient::Kubeconfig() + "</p>");
+            });
+        }
+
         // Checks version.txt on GitHub Pages against APP_VERSION: once silently shortly
         // after startup (and periodically thereafter), and on demand via the toolbar
         // action (which also confirms when already up to date).
@@ -609,6 +651,23 @@ namespace {
                 return;
             }
             logInfo << "Updated kubeconfig user" << userName << "to use AWS profile" << accountKey;
+        }
+
+        // Registered with KubectlClient as its relogin handler: called synchronously,
+        // right before a kubectl call, whenever the cached AWS session for the current
+        // context's account has expired. Blocks on a modal dialog until the user signs
+        // back in or cancels; returns whether fresh credentials are now active.
+        bool showReloginDialog() {
+            const QString accountKey = currentAwsAccountKey();
+            const auto result = ReloginDialog::Show(this, accountKey,
+                                                      Configuration::instance().GetValue<QString>("onelogin.user", QString()));
+            if (!result.success) return false;
+
+            awsCredentialsByAccount_[accountKey] = result.credentials;
+            KubectlClient::SetActiveAwsCredentials(result.credentials);
+            Configuration::instance().SetValue("onelogin.user", result.username);
+            updateExternalAwsConfig(accountKey, result.credentials, contextBox_->currentText());
+            return true;
         }
 
         // Returns true if login completed successfully (in which case credentials,
