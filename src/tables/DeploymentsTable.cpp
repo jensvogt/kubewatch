@@ -20,6 +20,14 @@ namespace {
                 return "All pods are ready";
         }
     }
+
+    Health ComputeHealth(const QJsonObject &deployment) {
+        const int ready = deployment["status"].toObject()["readyReplicas"].toInt();
+        const int desired = deployment["spec"].toObject()["replicas"].toInt(1);
+        if (desired > 0 && ready == 0) return Health::Error;
+        if (ready < desired) return Health::Warning;
+        return Health::Ok;
+    }
 }// namespace
 
 DeploymentsTable::DeploymentsTable(QWidget *parent) : KubeTable(parent) {
@@ -36,7 +44,7 @@ void DeploymentsTable::Refresh() {
     timer.start();
     const QJsonArray items = KubectlClient::fetchItems(ResourceArgs("deployments"));
 
-    PopulatePage(items, [&](const int row, const QJsonObject &deployment) {
+    PopulatePage(items, kHealthColumn, [](const QJsonObject &deployment) { return static_cast<long>(ComputeHealth(deployment)); }, [&](const int row, const QJsonObject &deployment) {
         const QJsonObject metadata = deployment["metadata"].toObject();
         const QJsonObject status = deployment["status"].toObject();
         const QJsonObject spec = deployment["spec"].toObject();
@@ -45,14 +53,7 @@ void DeploymentsTable::Refresh() {
         const int desired = spec["replicas"].toInt(1);
         const QString pods = QString("%1/%2").arg(ready).arg(desired);
 
-        Health health;
-        if (desired > 0 && ready == 0) {
-            health = Health::Error;
-        } else if (ready < desired) {
-            health = Health::Warning;
-        } else {
-            health = Health::Ok;
-        }
+        const Health health = ComputeHealth(deployment);
 
         SetColumn(row, 0, metadata["name"].toString());
         SetColumn(row, 1, pods, Qt::AlignRight | Qt::AlignVCenter);

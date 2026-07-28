@@ -78,6 +78,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/tables/NodesTable.cpp
         include/tables/NamespacesTable.h
         src/tables/NamespacesTable.cpp
+        include/tables/EventsTable.h
+        src/tables/EventsTable.cpp
         include/dialogs/OtpDialog.h
         src/dialogs/OtpDialog.cpp
         include/dialogs/LoginDialog.h

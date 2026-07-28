@@ -53,6 +53,7 @@
 #include <kubectl/KubectlClient.h>
 #include <onelogin/OneLoginAuth.h>
 #include <tables/DeploymentsTable.h>
+#include <tables/EventsTable.h>
 #include <tables/GenericTable.h>
 #include <tables/JobsTable.h>
 #include <tables/KubeTable.h>
@@ -88,7 +89,7 @@ namespace {
 } // namespace
 
 namespace {
-    enum class PageKind { Placeholder, Generic, Pods, Deployments, Jobs, Services, Ingresses, Nodes, Namespaces, Settings };
+    enum class PageKind { Placeholder, Generic, Pods, Deployments, Jobs, Services, Ingresses, Nodes, Namespaces, Events, Settings };
 
     class MainWindow : public QMainWindow {
     public:
@@ -340,6 +341,9 @@ namespace {
                 case PageKind::Namespaces:
                     page = new NamespacesTable();
                     break;
+                case PageKind::Events:
+                    page = new EventsTable();
+                    break;
             }
 
             const int pageIndex = pages_->addWidget(page);
@@ -401,6 +405,7 @@ namespace {
             auto *cluster = new QTreeWidgetItem(tree_, {"Cluster"});
             nodesItem_ = addLeaf(cluster, "Nodes", PageKind::Nodes, "nodes");
             addLeaf(cluster, "Namespaces", PageKind::Namespaces, "namespaces");
+            addLeaf(cluster, "Events", PageKind::Events, "events");
 
             addLeaf(nullptr, "Settings", PageKind::Settings);
 
@@ -434,15 +439,10 @@ namespace {
 
         void onContextChanged() {
             Configuration::instance().SetValue("ui.last-context", contextBox_->currentText());
-            // showLoginDialog() already refreshes credentials/namespaces/the current page
-            // on success; only do it here as a fallback if login was cancelled or failed,
-            // so switching context doesn't leave stale data on screen either way.
-            if (!showLoginDialog()) {
-                BusyGuard busyGuard;
-                updateActiveAwsCredentials();
-                loadNamespaces();
-                refreshCurrentPage();
-            }
+            // showLoginDialog() refreshes credentials/namespaces/the current page on
+            // success, and closes the application on failure/cancellation -- no fallback
+            // needed here either way.
+            showLoginDialog();
         }
 
         // Derives which OneLogin/AWS account ("int" or "prod") the currently selected
@@ -656,12 +656,15 @@ namespace {
         // Registered with KubectlClient as its relogin handler: called synchronously,
         // right before a kubectl call, whenever the cached AWS session for the current
         // context's account has expired. Blocks on a modal dialog until the user signs
-        // back in or cancels; returns whether fresh credentials are now active.
+        // back in or cancels; if login doesn't succeed, closes the application.
         bool showReloginDialog() {
             const QString accountKey = currentAwsAccountKey();
             const auto result = ReloginDialog::Show(this, accountKey,
                                                       Configuration::instance().GetValue<QString>("onelogin.user", QString()));
-            if (!result.success) return false;
+            if (!result.success) {
+                close();
+                return false;
+            }
 
             awsCredentialsByAccount_[accountKey] = result.credentials;
             KubectlClient::SetActiveAwsCredentials(result.credentials);
@@ -671,8 +674,9 @@ namespace {
         }
 
         // Returns true if login completed successfully (in which case credentials,
-        // namespaces and the current page have already been refreshed), false if the
-        // dialog was cancelled or login failed for any reason.
+        // namespaces and the current page have already been refreshed). If the dialog
+        // was cancelled or login failed for any reason, closes the application instead
+        // of returning to the (now unauthenticated) main window.
         bool showLoginDialog() {
             QStringList contexts;
             for (int i = 0; i < contextBox_->count(); ++i) {
@@ -690,7 +694,10 @@ namespace {
                     contextBox_->setCurrentIndex(idx);
                 }
             }
-            if (!result.success) return false;
+            if (!result.success) {
+                close();
+                return false;
+            }
 
             {
                 // Wrap the whole post-login sequence in one BusyGuard so the several
