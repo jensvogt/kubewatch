@@ -55,11 +55,12 @@ namespace {
 }// namespace
 
 PodsTable::PodsTable(QWidget *parent) : KubeTable(parent) {
-    ConfigureHeaders({"Name", "Ready", "Status", "Restarts", "Age", "Health", "Namespace"});
+    ConfigureHeaders({"Name", "Ready", "Status", "Restarts", "Age", "", "Namespace"});
     SetHiddenColumns({kNamespaceColumn});
     // Keep "Name" as logical column 0 (row selection and context-menu actions rely
     // on it), but display Health as the leftmost column.
     MoveColumnToFront(kHealthColumn);
+    SetResizeModes({QHeaderView::Stretch, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents});
     setServiceApis({"pods"});
 }
 

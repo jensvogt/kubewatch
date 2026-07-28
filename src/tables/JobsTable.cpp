@@ -48,11 +48,12 @@ namespace {
 }// namespace
 
 JobsTable::JobsTable(QWidget *parent) : KubeTable(parent) {
-    ConfigureHeaders({"Name", "Status", "Pods", "Created", "Age", "Health", "Namespace"});
+    ConfigureHeaders({"Name", "Status", "Pods", "Created", "Age", "", "Namespace"});
     SetHiddenColumns({kNamespaceColumn});
     // Keep "Name" as logical column 0 (row selection and context-menu actions rely
     // on it), but display Health as the leftmost column.
     MoveColumnToFront(kHealthColumn);
+    SetResizeModes({QHeaderView::Stretch, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents});
     setServiceApis({"jobs"});
 }
 
