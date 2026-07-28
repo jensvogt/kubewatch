@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.13](https://github.com/jensvogt/kubewatch/compare/1.3.12...1.3.13) (2026-07-28)
+
+
+### Bug Fixes
+
+* sorting of status ([5eecfe9](https://github.com/jensvogt/kubewatch/commit/5eecfe958b17e9adb0ad295ebafb25e9baf50806))
+
 ## [1.3.12](https://github.com/jensvogt/kubewatch/compare/1.3.11...1.3.12) (2026-07-28)
 
 
