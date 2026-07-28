@@ -23,3 +23,17 @@ bool PrefixFilterProxyModel::filterAcceptsRow(const int sourceRow, const QModelI
 
     return false; // SHOW the row
 }
+
+bool PrefixFilterProxyModel::lessThan(const QModelIndex &left, const QModelIndex &right) const {
+    // Icon-only columns (e.g. the health traffic light) carry no display text,
+    // so the default DisplayRole-based comparison treats every row as equal.
+    // Columns populated via SetColumn() store their real sort value in
+    // Qt::UserRole (e.g. Health::Error=0/red < Warning=1/orange < Ok=2/green);
+    // prefer that when both sides provide one.
+    const QVariant leftValue = sourceModel()->data(left, Qt::UserRole);
+    const QVariant rightValue = sourceModel()->data(right, Qt::UserRole);
+    if (leftValue.isValid() && rightValue.isValid()) {
+        return leftValue.toLongLong() < rightValue.toLongLong();
+    }
+    return QSortFilterProxyModel::lessThan(left, right);
+}

@@ -16,6 +16,35 @@ namespace {
         if (jobStatus == "Complete") return "Completed successfully";
         return health == Health::Warning ? "Not all pods are running" : "Running as expected";
     }
+
+    QString ComputeJobStatus(const QJsonObject &job) {
+        QString jobStatus = "Running";
+        for (const auto &conditionValue: job["status"].toObject()["conditions"].toArray()) {
+            if (const QJsonObject condition = conditionValue.toObject(); condition["status"].toString() == "True") {
+                jobStatus = condition["type"].toString();
+            }
+        }
+        return jobStatus;
+    }
+
+    Health ComputeHealth(const QJsonObject &job) {
+        const QString jobStatus = ComputeJobStatus(job);
+        if (jobStatus == "Failed") return Health::Error;
+        // The job's pods have exited after completion, so 0 running is expected.
+        if (jobStatus == "Complete") return Health::Ok;
+        if (jobStatus == "Suspended") return Health::Warning;
+
+        const int running = job["status"].toObject()["active"].toInt();
+        const QJsonValue completions = job["spec"].toObject()["completions"];
+        const QJsonValue parallelism = job["spec"].toObject()["parallelism"];
+        const int requestedCount = completions.isDouble()
+                                        ? completions.toInt()
+                                        : parallelism.isDouble()
+                                              ? parallelism.toInt()
+                                              : -1;
+        if (requestedCount >= 0 && running < requestedCount) return Health::Warning;
+        return Health::Ok;
+    }
 }// namespace
 
 JobsTable::JobsTable(QWidget *parent) : KubeTable(parent) {
@@ -32,17 +61,12 @@ void JobsTable::Refresh() {
     timer.start();
     const QJsonArray items = KubectlClient::fetchItems(ResourceArgs("jobs"));
 
-    PopulatePage(items, [&](int row, const QJsonObject &job) {
+    PopulatePage(items, kHealthColumn, [](const QJsonObject &job) { return static_cast<long>(ComputeHealth(job)); }, [&](int row, const QJsonObject &job) {
         const QJsonObject metadata = job["metadata"].toObject();
         const QJsonObject status = job["status"].toObject();
         const QJsonObject spec = job["spec"].toObject();
 
-        QString jobStatus = "Running";
-        for (const auto &conditionValue: status["conditions"].toArray()) {
-            if (const QJsonObject condition = conditionValue.toObject(); condition["status"].toString() == "True") {
-                jobStatus = condition["type"].toString();
-            }
-        }
+        const QString jobStatus = ComputeJobStatus(job);
 
         const int running = status["active"].toInt();
         const QJsonValue completions = spec["completions"];
@@ -55,19 +79,7 @@ void JobsTable::Refresh() {
         const QString requested = requestedCount >= 0 ? QString::number(requestedCount) : QStringLiteral("-");
         const QString pods = QString("%1/%2").arg(running).arg(requested);
 
-        Health health;
-        if (jobStatus == "Failed") {
-            health = Health::Error;
-        } else if (jobStatus == "Complete") {
-            // The job's pods have exited after completion, so 0 running is expected.
-            health = Health::Ok;
-        } else if (jobStatus == "Suspended") {
-            health = Health::Warning;
-        } else if (requestedCount >= 0 && running < requestedCount) {
-            health = Health::Warning;
-        } else {
-            health = Health::Ok;
-        }
+        const Health health = ComputeHealth(job);
 
         SetColumn(row, 0, metadata["name"].toString());
         SetColumn(row, 1, jobStatus);

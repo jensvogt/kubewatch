@@ -61,6 +61,7 @@ PageableTable::PageableTable(QWidget *parent) : QWidget(parent), _ui(new Ui::Pag
     connect(_ui->startButton, &QPushButton::clicked, this, [this]() {
         _pageIndex = 0;
         CalculatePageStatus();
+        emit ReloadTable();
     });
 
     _ui->previousButton->setText(nullptr);
@@ -122,6 +123,10 @@ PageableTable::PageableTable(QWidget *parent) : QWidget(parent), _ui(new Ui::Pag
         _sortColumn = logicalIndex;
         _sortDirection = order == Qt::AscendingOrder ? 1 : -1;
         _sortAttribute = _headerNames[logicalIndex];
+        // The proxy model only ever holds the current page's rows, so its own sort
+        // can't reorder rows across page boundaries. Reload so PopulatePage() can
+        // sort the full (unpaged) item set before slicing out the current page.
+        emit ReloadTable();
     });
 
     // Defaults

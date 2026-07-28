@@ -8,6 +8,7 @@
 // Awsmock includes
 #include <components/PageableTable.h>
 
+#include <algorithm>
 #include <functional>
 
 // Base class for every Kubernetes resource table shown in the main window's
@@ -64,16 +65,37 @@ protected:
     // pagination totals/labels reflect the filtered count rather than the unfiltered one.
     template<class RowFn>
     void PopulatePage(const QJsonArray &items, RowFn rowFn) {
+        PopulatePage(items, -1, [](const QJsonObject &) { return 0L; }, std::move(rowFn));
+    }
+
+    // Same as above, but if `sortColumn` is the table's currently active sort column
+    // (i.e. the user clicked that column's header), the full filtered item set is
+    // sorted by `sortKeyFn` -- respecting the current sort direction -- before it's
+    // sliced into a page.
+    //
+    // This matters because the table's proxy model only ever holds the current page's
+    // rows: sorting there can reorder rows within a page, but can never bring a row
+    // from another page to the top. Columns whose sort key can be computed directly
+    // from the raw item (e.g. the health traffic light) sort the whole set here instead,
+    // so e.g. all Error-health rows surface to page 1 regardless of which page they'd
+    // otherwise have landed on.
+    template<class RowFn, class SortKeyFn>
+    void PopulatePage(const QJsonArray &items, int sortColumn, SortKeyFn sortKeyFn, RowFn rowFn) {
         const QString prefix = GetPrefix();
-        QJsonArray filtered;
-        if (prefix.isEmpty()) {
-            filtered = items;
-        } else {
-            for (const auto &item: items) {
-                if (item.toObject()["metadata"].toObject()["name"].toString().startsWith(prefix)) {
-                    filtered.append(item);
-                }
+        QList<QJsonObject> filtered;
+        for (const auto &item: items) {
+            if (QJsonObject obj = item.toObject(); prefix.isEmpty() || obj["metadata"].toObject()["name"].toString().startsWith(prefix)) {
+                filtered.append(obj);
             }
+        }
+
+        if (sortColumn >= 0 && GetSortColumn() == sortColumn) {
+            const bool ascending = GetSortDirection() == 1;
+            std::stable_sort(filtered.begin(), filtered.end(), [&](const QJsonObject &a, const QJsonObject &b) {
+                const long keyA = sortKeyFn(a);
+                const long keyB = sortKeyFn(b);
+                return ascending ? keyA < keyB : keyA > keyB;
+            });
         }
 
         Clear();
@@ -84,7 +106,7 @@ protected:
         if (end > filtered.size()) end = filtered.size();
 
         for (long i = start; i < end; ++i) {
-            rowFn(static_cast<int>(i - start), filtered[static_cast<int>(i)].toObject());
+            rowFn(static_cast<int>(i - start), filtered[static_cast<int>(i)]);
         }
     }
 

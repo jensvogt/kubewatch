@@ -20,6 +20,38 @@ namespace {
                 return podStatus == "Succeeded" ? "Completed successfully" : "Running and ready";
         }
     }
+
+    // Recomputes just enough of the pod's status to derive its health -- mirrors the
+    // fuller parse in Refresh()'s row callback, which also needs podStatus/ready/restarts
+    // for display.
+    Health ComputeHealth(const QJsonObject &pod) {
+        const QJsonObject metadata = pod["metadata"].toObject();
+        const QJsonObject status = pod["status"].toObject();
+
+        QString podStatus = status["phase"].toString();
+        int readyContainers = 0;
+        const QJsonArray containerStatuses = status["containerStatuses"].toArray();
+        for (const auto &containerStatusValue: containerStatuses) {
+            const QJsonObject containerStatus = containerStatusValue.toObject();
+            if (containerStatus["ready"].toBool()) {
+                ++readyContainers;
+            }
+            if (const QJsonObject waiting = containerStatus["state"].toObject()["waiting"].toObject(); !waiting.isEmpty()) {
+                podStatus = waiting["reason"].toString();
+            }
+        }
+        if (metadata.contains("deletionTimestamp")) {
+            podStatus = "Terminating";
+        }
+
+        if (podStatus == "Succeeded") {
+            // Job/CronJob pods exit after completion, so 0 ready containers is expected.
+            return Health::Ok;
+        }
+        if (podStatus != "Running") return Health::Error;
+        if (readyContainers != containerStatuses.size()) return Health::Warning;
+        return Health::Ok;
+    }
 }// namespace
 
 PodsTable::PodsTable(QWidget *parent) : KubeTable(parent) {
@@ -36,7 +68,7 @@ void PodsTable::Refresh() {
     timer.start();
     const QJsonArray items = KubectlClient::fetchItems(ResourceArgs("pods"));
 
-    PopulatePage(items, [&](const int row, const QJsonObject &pod) {
+    PopulatePage(items, kHealthColumn, [](const QJsonObject &pod) { return static_cast<long>(ComputeHealth(pod)); }, [&](const int row, const QJsonObject &pod) {
         const QJsonObject metadata = pod["metadata"].toObject();
         const QJsonObject status = pod["status"].toObject();
 
@@ -60,17 +92,7 @@ void PodsTable::Refresh() {
         }
         const QString ready = QString("%1/%2").arg(readyContainers).arg(containerStatuses.size());
 
-        Health health;
-        if (podStatus == "Succeeded") {
-            // Job/CronJob pods exit after completion, so 0 ready containers is expected.
-            health = Health::Ok;
-        } else if (podStatus != "Running") {
-            health = Health::Error;
-        } else if (readyContainers != containerStatuses.size()) {
-            health = Health::Warning;
-        } else {
-            health = Health::Ok;
-        }
+        const Health health = ComputeHealth(pod);
 
         SetColumn(row, 0, metadata["name"].toString());
         SetColumn(row, 1, ready);
