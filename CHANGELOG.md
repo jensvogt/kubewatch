@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.12](https://github.com/jensvogt/kubewatch/compare/1.3.11...1.3.12) (2026-07-28)
+
+
+### Bug Fixes
+
+* sorting, cancel on failed login. paging ([bb2b824](https://github.com/jensvogt/kubewatch/commit/bb2b8242bc28c1bc614e8911e15f2928c56f32e4))
+* sorting, cancel on failed login. paging ([4dc3be2](https://github.com/jensvogt/kubewatch/commit/4dc3be26e4d8c82c973e9da736aff503d9f7471a))
+
 ## [1.3.11](https://github.com/jensvogt/kubewatch/compare/1.3.10...1.3.11) (2026-07-27)
 
 
