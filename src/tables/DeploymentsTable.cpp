@@ -31,11 +31,12 @@ namespace {
 }// namespace
 
 DeploymentsTable::DeploymentsTable(QWidget *parent) : KubeTable(parent) {
-    ConfigureHeaders({"Name", "Pods", "Age", "Health", "Namespace"});
+    ConfigureHeaders({"Name", "Pods", "Age", "", "Namespace"});
     SetHiddenColumns({kNamespaceColumn});
     // Keep "Name" as logical column 0 (row selection and context-menu actions rely
     // on it), but display Health as the leftmost column.
     MoveColumnToFront(kHealthColumn);
+    SetResizeModes({QHeaderView::Stretch, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents, QHeaderView::ResizeToContents});
     setServiceApis({"deployments"});
 }
 
