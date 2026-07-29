@@ -9,10 +9,11 @@
 QString OtpDialog::Prompt(QWidget *parent) {
     QDialog dialog(parent);
     dialog.setWindowTitle("OneLogin Sign In");
+    dialog.setMinimumWidth(300);
 
     auto *form = new QFormLayout(&dialog);
     auto *otpEdit = new QLineEdit(&dialog);
-    form->addRow("Authenticator Token", otpEdit);
+    form->addRow("Authenticator Token: ", otpEdit);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText("Verify");
