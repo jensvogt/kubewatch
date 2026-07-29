@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.14](https://github.com/jensvogt/kubewatch/compare/1.3.13...1.3.14) (2026-07-29)
+
+
+### Bug Fixes
+
+* ReplicaSets, Deployments ([62e8063](https://github.com/jensvogt/kubewatch/commit/62e806347cc22dd35e169be7bc2f3b5818f909a0))
+* ReplicaSets, Deployments ([2ba69f9](https://github.com/jensvogt/kubewatch/commit/2ba69f94be8cdac621b4fb34fd2c80de569cf941))
+
 ## [1.3.13](https://github.com/jensvogt/kubewatch/compare/1.3.12...1.3.13) (2026-07-28)
 
 
