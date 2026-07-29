@@ -70,6 +70,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/tables/PodsTable.cpp
         include/tables/DeploymentsTable.h
         src/tables/DeploymentsTable.cpp
+        include/tables/ReplicaSetsTable.h
+        src/tables/ReplicaSetsTable.cpp
         include/tables/JobsTable.h
         src/tables/JobsTable.cpp
         include/tables/ServicesTable.h
@@ -94,6 +96,10 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/dialogs/JobDetailsDialog.cpp
         include/dialogs/DeploymentDetailsDialog.h
         src/dialogs/DeploymentDetailsDialog.cpp
+        include/dialogs/DaemonSetDetailsDialog.h
+        src/dialogs/DaemonSetDetailsDialog.cpp
+        include/dialogs/ReplicaSetDetailsDialog.h
+        src/dialogs/ReplicaSetDetailsDialog.cpp
         include/dialogs/PodDetailsDialog.h
         src/dialogs/PodDetailsDialog.cpp
         include/dialogs/ServiceDetailsDialog.h

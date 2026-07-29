@@ -39,6 +39,7 @@
 #include <QWidget>
 
 #include <Version.h>
+#include <dialogs/DaemonSetDetailsDialog.h>
 #include <dialogs/EditResourceDialog.h>
 #include <dialogs/IngressDetailsDialog.h>
 #include <dialogs/JobDetailsDialog.h>
@@ -49,6 +50,7 @@
 #include <dialogs/NodeDetailsDialog.h>
 #include <dialogs/PodDetailsDialog.h>
 #include <dialogs/ReloginDialog.h>
+#include <dialogs/ReplicaSetDetailsDialog.h>
 #include <dialogs/ServiceDetailsDialog.h>
 #include <kubectl/KubectlClient.h>
 #include <onelogin/OneLoginAuth.h>
@@ -60,6 +62,7 @@
 #include <tables/NamespacesTable.h>
 #include <tables/NodesTable.h>
 #include <tables/PodsTable.h>
+#include <tables/ReplicaSetsTable.h>
 #include <tables/ServicesTable.h>
 #include <utils/Configuration.h>
 #include <utils/IconUtils.h>
@@ -89,7 +92,7 @@ namespace {
 } // namespace
 
 namespace {
-    enum class PageKind { Placeholder, Generic, Pods, Deployments, Jobs, Services, Ingresses, Nodes, Namespaces, Events, Settings };
+    enum class PageKind { Placeholder, Generic, Pods, Deployments, ReplicaSets, DaemonSets, Jobs, Services, Ingresses, Nodes, Namespaces, Events, Settings };
 
     class MainWindow : public QMainWindow {
     public:
@@ -321,6 +324,7 @@ namespace {
                     break;
                 case PageKind::Generic:
                 case PageKind::Ingresses:
+                case PageKind::DaemonSets:
                     page = new GenericTable(kubectlName);
                     break;
                 case PageKind::Pods:
@@ -328,6 +332,9 @@ namespace {
                     break;
                 case PageKind::Deployments:
                     page = new DeploymentsTable();
+                    break;
+                case PageKind::ReplicaSets:
+                    page = new ReplicaSetsTable();
                     break;
                 case PageKind::Jobs:
                     page = new JobsTable();
@@ -363,12 +370,18 @@ namespace {
                 } else if (kind == PageKind::Deployments) {
                     connect(table, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showDeploymentDetailsForRow(pageIndex, index); });
+                } else if (kind == PageKind::ReplicaSets) {
+                    connect(table, &PageableTable::DoubleClicked, this,
+                            [this, pageIndex](const QModelIndex &index) { showReplicaSetDetailsForRow(pageIndex, index); });
                 } else if (kind == PageKind::Services) {
                     connect(table, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showServiceDetailsForRow(pageIndex, index); });
                 } else if (kind == PageKind::Ingresses) {
                     connect(table, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showIngressDetailsForRow(pageIndex, index); });
+                } else if (kind == PageKind::DaemonSets) {
+                    connect(table, &PageableTable::DoubleClicked, this,
+                            [this, pageIndex](const QModelIndex &index) { showDaemonSetDetailsForRow(pageIndex, index); });
                 } else if (kind == PageKind::Nodes) {
                     connect(table, &PageableTable::DoubleClicked, this,
                             [this, pageIndex](const QModelIndex &index) { showNodeDetailsForRow(pageIndex, index); });
@@ -389,8 +402,9 @@ namespace {
             auto *workloads = new QTreeWidgetItem(tree_, {"Workloads"});
             addLeaf(workloads, "Pods", PageKind::Pods, "pods");
             addLeaf(workloads, "Deployments", PageKind::Deployments, "deployments");
+            addLeaf(workloads, "ReplicaSets", PageKind::ReplicaSets, "replicasets");
             addLeaf(workloads, "StatefulSets", PageKind::Generic, "statefulsets");
-            addLeaf(workloads, "DaemonSets", PageKind::Generic, "daemonsets");
+            addLeaf(workloads, "DaemonSets", PageKind::DaemonSets, "daemonsets");
             addLeaf(workloads, "Jobs", PageKind::Jobs, "jobs");
 
             auto *service = new QTreeWidgetItem(tree_, {"Service"});
@@ -571,6 +585,22 @@ namespace {
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
             DeploymentDetailsDialog::Show(this, baseArgs(), name, ns);
+        }
+
+        void showDaemonSetDetailsForRow(int pageIndex, const QModelIndex &index) {
+            auto *table = qobject_cast<KubeTable *>(pages_->widget(pageIndex));
+            if (!table || !index.isValid()) return;
+            const auto name = table->GetValue<QString>(index, 0);
+            const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
+            DaemonSetDetailsDialog::Show(this, baseArgs(), name, ns);
+        }
+
+        void showReplicaSetDetailsForRow(int pageIndex, const QModelIndex &index) {
+            auto *table = qobject_cast<KubeTable *>(pages_->widget(pageIndex));
+            if (!table || !index.isValid()) return;
+            const auto name = table->GetValue<QString>(index, 0);
+            const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
+            ReplicaSetDetailsDialog::Show(this, baseArgs(), name, ns);
         }
 
         void showServiceDetailsForRow(int pageIndex, const QModelIndex &index) {
