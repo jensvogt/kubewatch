@@ -1,8 +1,9 @@
 #include <tables/NodesTable.h>
 
-#include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/EventBus.h>
 #include <utils/KubeFormat.h>
+#include <utils/Logging.h>
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -15,20 +16,19 @@ NodesTable::NodesTable(QWidget *parent) : KubeTable(parent) {
 void NodesTable::Refresh() {
     QElapsedTimer timer;
     timer.start();
-    // Both kubectl calls below are gathered under one guard so the busy overlay
-    // shows/hides at most once for the pair, instead of potentially flickering
-    // between them (each kubectl call otherwise manages the overlay on its own).
-    BusyGuard busyGuard;
-    QStringList args = BaseArgs();
-    args << "get" << "nodes" << "-o" << "json";
-    const QJsonArray items = KubectlClient::fetchItems(args);
 
-    QStringList podArgs = BaseArgs();
-    podArgs << "get" << "pods" << "--all-namespaces" << "-o" << "json";
+    KubeNetService &svc = KubeNetService::forContext(CurrentContext());
+    if (!svc.IsValid()) {
+        logWarning << svc.LastError();
+        return;
+    }
+    const QJsonArray nodes = svc.fetchNodes();
+    const QJsonArray allPods = svc.fetchItems(KubeNetService::ResourcePath("pods"));
+
     QHash<QString, int> podCountByNode;
     QHash<QString, qint64> cpuRequestMillisByNode;
     QHash<QString, qint64> cpuLimitMillisByNode;
-    for (const auto &podValue: KubectlClient::fetchItems(podArgs)) {
+    for (const auto &podValue: allPods) {
         const QJsonObject pod = podValue.toObject();
         const QString nodeName = pod["spec"].toObject()["nodeName"].toString();
         if (nodeName.isEmpty() || KubeFormat::isTerminatedPodPhase(pod["status"].toObject()["phase"].toString())) continue;
@@ -41,7 +41,7 @@ void NodesTable::Refresh() {
         }
     }
 
-    PopulatePage(items, [&](const int row, const QJsonObject &node) {
+    PopulatePage(nodes, [&](const int row, const QJsonObject &node) {
         const QJsonObject metadata = node["metadata"].toObject();
         const QString name = metadata["name"].toString();
 

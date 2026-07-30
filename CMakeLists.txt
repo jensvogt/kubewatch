@@ -63,6 +63,8 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         include/utils/UpdateChecker.h
         include/kubectl/KubectlClient.h
         src/kubectl/KubectlClient.cpp
+        include/kubectl/KubeNetService.h
+        src/kubectl/KubeNetService.cpp
         include/tables/KubeTable.h
         include/tables/GenericTable.h
         src/tables/GenericTable.cpp
@@ -74,6 +76,10 @@ add_executable(kubewatch WIN32 MACOSX_BUNDLE
         src/tables/ReplicaSetsTable.cpp
         include/tables/JobsTable.h
         src/tables/JobsTable.cpp
+        include/tables/DaemonSetsTable.h
+        src/tables/DaemonSetsTable.cpp
+        include/tables/StatefulSetsTable.h
+        src/tables/StatefulSetsTable.cpp
         include/tables/ServicesTable.h
         src/tables/ServicesTable.cpp
         include/tables/NodesTable.h

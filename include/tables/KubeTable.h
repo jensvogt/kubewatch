@@ -15,24 +15,24 @@
 // stacked pages. A concrete subclass configures its own headers/resize modes
 // in its constructor and implements Refresh() to fetch and populate itself.
 //
-// MainWindow supplies the two argument providers once, at construction time,
+// MainWindow supplies the argument providers once, at construction time,
 // binding them to its own context/namespace combo boxes -- this is the only
 // piece of MainWindow state a table needs.
 class KubeTable : public PageableTable {
     Q_OBJECT
 
 public:
-    using ResourceArgsProvider = std::function<QStringList(const QString &)>;
-    using BaseArgsProvider = std::function<QStringList()>;
+    using ContextProvider = std::function<QString()>;
+    using NamespaceProvider = std::function<QString()>;
 
     explicit KubeTable(QWidget *parent = nullptr) : PageableTable(parent) {}
 
-    void SetArgsProviders(ResourceArgsProvider resourceArgsFn, BaseArgsProvider baseArgsFn) {
-        resourceArgsFn_ = std::move(resourceArgsFn);
-        baseArgsFn_ = std::move(baseArgsFn);
+    void SetArgsProviders(ContextProvider contextFn, NamespaceProvider namespaceFn) {
+        contextFn_ = std::move(contextFn);
+        namespaceFn_ = std::move(namespaceFn);
     }
 
-    // Fetches the resource(s) via kubectl and repopulates the current page.
+    // Fetches the resource(s) via the Kubernetes REST API and repopulates the current page.
     virtual void Refresh() = 0;
 
     // The kubectl resource name this table lists (used for the row context
@@ -45,8 +45,12 @@ public:
     [[nodiscard]] virtual bool SupportsLogs() const { return false; }
 
 protected:
-    [[nodiscard]] QStringList ResourceArgs(const QString &resource) const { return resourceArgsFn_(resource); }
-    [[nodiscard]] QStringList BaseArgs() const { return baseArgsFn_(); }
+    // The currently selected kubeconfig context's name (i.e. MainWindow's context combo box).
+    [[nodiscard]] QString CurrentContext() const { return contextFn_(); }
+
+    // The currently selected namespace (i.e. MainWindow's namespace combo box), or
+    // "All namespaces" when no specific namespace is selected.
+    [[nodiscard]] QString CurrentNamespace() const { return namespaceFn_(); }
 
     // Sets header names and the default resize modes (first column stretches, the
     // rest size to their contents) -- the layout every kube resource table uses.
@@ -111,6 +115,6 @@ protected:
     }
 
 private:
-    ResourceArgsProvider resourceArgsFn_;
-    BaseArgsProvider baseArgsFn_;
+    ContextProvider contextFn_;
+    NamespaceProvider namespaceFn_;
 };

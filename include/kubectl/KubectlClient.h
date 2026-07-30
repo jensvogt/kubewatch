@@ -72,6 +72,13 @@ namespace KubectlClient {
     KubectlResult runKubectlCommand(const QStringList &args, const QString &stdinData = QString());
     QString runKubectl(const QStringList &args);
     QJsonArray fetchItems(const QStringList &args);
+
+    // Mints a short-lived bearer token for the given EKS cluster by shelling out to
+    // `aws eks get-token`, signed with whatever AWS session is currently active (see
+    // SetActiveAwsCredentials) -- the same token an exec-based kubeconfig user entry
+    // would produce, without going through kubectl itself. Returns an empty string
+    // and (if given) fills *error on failure.
+    QString GetBearerToken(const QString &clusterName, QString *error = nullptr);
 } // namespace KubectlClient
 
 // RAII guard that shows the busy overlay if the guarded scope (which may span

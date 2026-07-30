@@ -1,13 +1,13 @@
 #include <dialogs/JobDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -15,30 +15,28 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
-void JobDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name, const QString &ns) {
+void JobDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name, const QString &ns) {
     QJsonObject job;
     QJsonArray pods;
     QJsonArray events;
     {
         BusyGuard busyGuard;
 
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "jobs" << name << "-n" << ns << "-o" << "json";
-        const auto [success, output, error] = KubectlClient::runKubectlCommand(getArgs);
-        if (!success) {
-            QMessageBox::warning(parent, "Job details failed", error);
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "Job details failed", svc.LastError());
             return;
         }
-        job = QJsonDocument::fromJson(output.toUtf8()).object();
 
-        QStringList podArgs = baseArgs;
-        podArgs << "get" << "pods" << "-n" << ns << "-l" << "job-name=" + name << "-o" << "json";
-        pods = KubectlClient::fetchItems(podArgs);
+        job = svc.fetchObject(KubeNetService::ResourcePath("jobs", ns) + "/" + name);
+        if (job.isEmpty()) {
+            QMessageBox::warning(parent, "Job details failed", svc.LastError());
+            return;
+        }
 
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "-n" << ns << "--field-selector"
-                << "involvedObject.name=" + name + ",involvedObject.kind=Job" << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        pods = svc.fetchItems(KubeNetService::ResourcePath("pods", ns) + "?labelSelector=job-name=" + name);
+
+        events = svc.fetchItems(KubeNetService::ResourcePath("events", ns) + "?fieldSelector=involvedObject.name=" + name + ",involvedObject.kind=Job");
     }
 
     const QJsonObject metadata = job["metadata"].toObject();

@@ -1,9 +1,10 @@
 #include <tables/PodsTable.h>
 
-#include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/EventBus.h>
 #include <utils/HealthLight.h>
 #include <utils/KubeFormat.h>
+#include <utils/Logging.h>
 
 #include <QElapsedTimer>
 
@@ -67,7 +68,13 @@ PodsTable::PodsTable(QWidget *parent) : KubeTable(parent) {
 void PodsTable::Refresh() {
     QElapsedTimer timer;
     timer.start();
-    const QJsonArray items = KubectlClient::fetchItems(ResourceArgs("pods"));
+
+    KubeNetService &svc = KubeNetService::forContext(CurrentContext());
+    if (!svc.IsValid()) {
+        logWarning << svc.LastError();
+        return;
+    }
+    const QJsonArray items = svc.fetchItems(KubeNetService::ResourcePath("pods", CurrentNamespace()));
 
     PopulatePage(items, kHealthColumn, [](const QJsonObject &pod) { return static_cast<long>(ComputeHealth(pod)); }, [&](const int row, const QJsonObject &pod) {
         const QJsonObject metadata = pod["metadata"].toObject();

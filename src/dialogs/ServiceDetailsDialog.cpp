@@ -1,6 +1,7 @@
 #include <dialogs/ServiceDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QDialog>
@@ -8,7 +9,6 @@
 #include <QGroupBox>
 #include <QHash>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -16,7 +16,7 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
-void ServiceDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name, const QString &ns) {
+void ServiceDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name, const QString &ns) {
     QJsonObject service;
     QJsonArray endpointSubsets;
     QJsonArray pods;
@@ -25,35 +25,29 @@ void ServiceDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, co
     {
         BusyGuard busyGuard;
 
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "services" << name << "-n" << ns << "-o" << "json";
-        const KubectlResult serviceResult = KubectlClient::runKubectlCommand(getArgs);
-        if (!serviceResult.success) {
-            QMessageBox::warning(parent, "Service details failed", serviceResult.error);
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "Service details failed", svc.LastError());
             return;
         }
-        service = QJsonDocument::fromJson(serviceResult.output.toUtf8()).object();
 
-        QStringList endpointArgs = baseArgs;
-        endpointArgs << "get" << "endpoints" << name << "-n" << ns << "-o" << "json";
-        const KubectlResult endpointResult = KubectlClient::runKubectlCommand(endpointArgs);
-        if (endpointResult.success) {
-            endpointSubsets = QJsonDocument::fromJson(endpointResult.output.toUtf8()).object()["subsets"].toArray();
+        service = svc.fetchObject(KubeNetService::ResourcePath("services", ns) + "/" + name);
+        if (service.isEmpty()) {
+            QMessageBox::warning(parent, "Service details failed", svc.LastError());
+            return;
         }
+
+        endpointSubsets = svc.fetchObject(KubeNetService::ResourcePath("endpoints", ns) + "/" + name)["subsets"].toArray();
 
         if (const QJsonObject selector = service["spec"].toObject()["selector"].toObject(); !selector.isEmpty()) {
             QStringList selectorParts;
             for (auto it = selector.begin(); it != selector.end(); ++it) {
                 selectorParts << it.key() + "=" + it.value().toString();
             }
-            QStringList podArgs = baseArgs;
-            podArgs << "get" << "pods" << "-n" << ns << "-l" << selectorParts.join(",") << "-o" << "json";
-            pods = KubectlClient::fetchItems(podArgs);
+            pods = svc.fetchItems(KubeNetService::ResourcePath("pods", ns) + "?labelSelector=" + selectorParts.join(","));
         }
 
-        QStringList ingressArgs = baseArgs;
-        ingressArgs << "get" << "ingresses" << "-n" << ns << "-o" << "json";
-        for (const auto &ingressValue: KubectlClient::fetchItems(ingressArgs)) {
+        for (const auto &ingressValue: svc.fetchItems(KubeNetService::ResourcePath("ingresses", ns))) {
             const QJsonObject ingress = ingressValue.toObject();
             const QJsonObject ingressSpec = ingress["spec"].toObject();
             bool referencesService =
@@ -71,10 +65,7 @@ void ServiceDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, co
             }
         }
 
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "-n" << ns << "--field-selector"
-                << "involvedObject.name=" + name + ",involvedObject.kind=Service" << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        events = svc.fetchItems(KubeNetService::ResourcePath("events", ns) + "?fieldSelector=involvedObject.name=" + name + ",involvedObject.kind=Service");
     }
 
     const QJsonObject metadata = service["metadata"].toObject();

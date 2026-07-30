@@ -1,6 +1,7 @@
 #include <dialogs/NamespaceDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QBrush>
@@ -9,7 +10,6 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -32,7 +32,7 @@ namespace {
     }
 } // namespace
 
-void NamespaceDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name) {
+void NamespaceDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name) {
     QJsonObject ns;
     QJsonArray resourceQuotas;
     QJsonArray limitRanges;
@@ -40,26 +40,21 @@ void NamespaceDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, 
     {
         BusyGuard busyGuard;
 
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "namespace" << name << "-o" << "json";
-        const KubectlResult result = KubectlClient::runKubectlCommand(getArgs);
-        if (!result.success) {
-            QMessageBox::warning(parent, "Namespace details failed", result.error);
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "Namespace details failed", svc.LastError());
             return;
         }
-        ns = QJsonDocument::fromJson(result.output.toUtf8()).object();
 
-        QStringList quotaArgs = baseArgs;
-        quotaArgs << "get" << "resourcequotas" << "-n" << name << "-o" << "json";
-        resourceQuotas = KubectlClient::fetchItems(quotaArgs);
+        ns = svc.fetchObject(KubeNetService::ResourcePath("namespaces") + "/" + name);
+        if (ns.isEmpty()) {
+            QMessageBox::warning(parent, "Namespace details failed", svc.LastError());
+            return;
+        }
 
-        QStringList limitArgs = baseArgs;
-        limitArgs << "get" << "limitranges" << "-n" << name << "-o" << "json";
-        limitRanges = KubectlClient::fetchItems(limitArgs);
-
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "-n" << name << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        resourceQuotas = svc.fetchItems(KubeNetService::ResourcePath("resourcequotas", name));
+        limitRanges = svc.fetchItems(KubeNetService::ResourcePath("limitranges", name));
+        events = svc.fetchItems(KubeNetService::ResourcePath("events", name));
     }
 
     const QJsonObject metadata = ns["metadata"].toObject();

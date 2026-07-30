@@ -53,7 +53,9 @@
 #include <dialogs/ReplicaSetDetailsDialog.h>
 #include <dialogs/ServiceDetailsDialog.h>
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <onelogin/OneLoginAuth.h>
+#include <tables/DaemonSetsTable.h>
 #include <tables/DeploymentsTable.h>
 #include <tables/EventsTable.h>
 #include <tables/GenericTable.h>
@@ -64,6 +66,7 @@
 #include <tables/PodsTable.h>
 #include <tables/ReplicaSetsTable.h>
 #include <tables/ServicesTable.h>
+#include <tables/StatefulSetsTable.h>
 #include <utils/Configuration.h>
 #include <utils/IconUtils.h>
 #include <utils/Logging.h>
@@ -92,7 +95,7 @@ namespace {
 } // namespace
 
 namespace {
-    enum class PageKind { Placeholder, Generic, Pods, Deployments, ReplicaSets, DaemonSets, Jobs, Services, Ingresses, Nodes, Namespaces, Events, Settings };
+    enum class PageKind { Placeholder, Generic, Pods, Deployments, ReplicaSets, DaemonSets, StatefulSets, Jobs, Services, Ingresses, Nodes, Namespaces, Events, Settings };
 
     class MainWindow : public QMainWindow {
     public:
@@ -299,20 +302,6 @@ namespace {
         [[nodiscard]]
         QStringList baseArgs() const { return {"--kubeconfig", KubectlClient::Kubeconfig(), "--context", contextBox_->currentText()}; }
 
-        [[nodiscard]]
-        QStringList resourceArgs(const QString &resource) const {
-            QStringList args = baseArgs();
-            args << "get" << resource;
-            const QString ns = namespaceBox_->currentText();
-            if (ns.isEmpty() || ns == "All namespaces") {
-                args << "--all-namespaces";
-            } else {
-                args << "-n" << ns;
-            }
-            args << "-o" << "json";
-            return args;
-        }
-
         QTreeWidgetItem *addLeaf(QTreeWidgetItem *parent, const QString &label, const PageKind kind, const QString &kubectlName = QString()) {
             QWidget *page = nullptr;
             switch (kind) {
@@ -324,8 +313,13 @@ namespace {
                     break;
                 case PageKind::Generic:
                 case PageKind::Ingresses:
-                case PageKind::DaemonSets:
                     page = new GenericTable(kubectlName);
+                    break;
+                case PageKind::DaemonSets:
+                    page = new DaemonSetsTable();
+                    break;
+                case PageKind::StatefulSets:
+                    page = new StatefulSetsTable();
                     break;
                 case PageKind::Pods:
                     page = new PodsTable();
@@ -356,8 +350,8 @@ namespace {
             const int pageIndex = pages_->addWidget(page);
 
             if (auto *table = qobject_cast<KubeTable *>(page)) {
-                table->SetArgsProviders([this](const QString &resource) { return resourceArgs(resource); },
-                                         [this] { return baseArgs(); });
+                table->SetArgsProviders([this] { return contextBox_->currentText(); },
+                                         [this] { return namespaceBox_->currentText(); });
                 connect(table, &PageableTable::ReloadTable, this, &MainWindow::refreshCurrentPage);
                 connect(table, &PageableTable::ContextMenuRequested, this,
                         [this, pageIndex](const QPoint &pos) { showTableContextMenu(pageIndex, pos); });
@@ -403,7 +397,7 @@ namespace {
             addLeaf(workloads, "Pods", PageKind::Pods, "pods");
             addLeaf(workloads, "Deployments", PageKind::Deployments, "deployments");
             addLeaf(workloads, "ReplicaSets", PageKind::ReplicaSets, "replicasets");
-            addLeaf(workloads, "StatefulSets", PageKind::Generic, "statefulsets");
+            addLeaf(workloads, "StatefulSets", PageKind::StatefulSets, "statefulsets");
             addLeaf(workloads, "DaemonSets", PageKind::DaemonSets, "daemonsets");
             addLeaf(workloads, "Jobs", PageKind::Jobs, "jobs");
 
@@ -444,9 +438,9 @@ namespace {
             const QSignalBlocker blocker(namespaceBox_);
             namespaceBox_->clear();
             namespaceBox_->addItem("All namespaces");
-            QStringList args = baseArgs();
-            args << "get" << "namespaces" << "-o" << "json";
-            for (const auto &item: KubectlClient::fetchItems(args)) {
+            KubeNetService &svc = KubeNetService::forContext(contextBox_->currentText());
+            if (!svc.IsValid()) return;
+            for (const auto &item: svc.fetchItems(KubeNetService::ResourcePath("namespaces"))) {
                 namespaceBox_->addItem(item.toObject()["metadata"].toObject()["name"].toString());
             }
         }
@@ -537,7 +531,7 @@ namespace {
             } else if (chosen == deleteAction) {
                 deleteResource(table->ResourceName(), name, ns);
             } else if (chosen == logsAction) {
-                LogsDialog::Show(this, baseArgs(), table->ResourceName(), name, ns);
+                LogsDialog::Show(this, contextBox_->currentText(), table->ResourceName(), name, ns);
             }
         }
 
@@ -568,7 +562,7 @@ namespace {
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
-            JobDetailsDialog::Show(this, baseArgs(), name, ns);
+            JobDetailsDialog::Show(this, contextBox_->currentText(), name, ns);
         }
 
         void showPodDetailsForRow(int pageIndex, const QModelIndex &index) {
@@ -576,7 +570,7 @@ namespace {
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
-            PodDetailsDialog::Show(this, baseArgs(), name, ns);
+            PodDetailsDialog::Show(this, contextBox_->currentText(), name, ns);
         }
 
         void showDeploymentDetailsForRow(int pageIndex, const QModelIndex &index) {
@@ -584,7 +578,7 @@ namespace {
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
-            DeploymentDetailsDialog::Show(this, baseArgs(), name, ns);
+            DeploymentDetailsDialog::Show(this, contextBox_->currentText(), name, ns);
         }
 
         void showDaemonSetDetailsForRow(int pageIndex, const QModelIndex &index) {
@@ -592,7 +586,7 @@ namespace {
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
-            DaemonSetDetailsDialog::Show(this, baseArgs(), name, ns);
+            DaemonSetDetailsDialog::Show(this, contextBox_->currentText(), name, ns);
         }
 
         void showReplicaSetDetailsForRow(int pageIndex, const QModelIndex &index) {
@@ -600,7 +594,7 @@ namespace {
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
-            ReplicaSetDetailsDialog::Show(this, baseArgs(), name, ns);
+            ReplicaSetDetailsDialog::Show(this, contextBox_->currentText(), name, ns);
         }
 
         void showServiceDetailsForRow(int pageIndex, const QModelIndex &index) {
@@ -608,7 +602,7 @@ namespace {
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
-            ServiceDetailsDialog::Show(this, baseArgs(), name, ns);
+            ServiceDetailsDialog::Show(this, contextBox_->currentText(), name, ns);
         }
 
         void showIngressDetailsForRow(int pageIndex, const QModelIndex &index) {
@@ -616,21 +610,21 @@ namespace {
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
             const auto ns = table->GetValue<QString>(index, table->NamespaceColumn());
-            IngressDetailsDialog::Show(this, baseArgs(), name, ns);
+            IngressDetailsDialog::Show(this, contextBox_->currentText(), name, ns);
         }
 
         void showNodeDetailsForRow(int pageIndex, const QModelIndex &index) {
             auto *table = qobject_cast<KubeTable *>(pages_->widget(pageIndex));
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
-            NodeDetailsDialog::Show(this, baseArgs(), name);
+            NodeDetailsDialog::Show(this, contextBox_->currentText(), name);
         }
 
         void showNamespaceDetailsForRow(int pageIndex, const QModelIndex &index) {
             auto *table = qobject_cast<KubeTable *>(pages_->widget(pageIndex));
             if (!table || !index.isValid()) return;
             const auto name = table->GetValue<QString>(index, 0);
-            NamespaceDetailsDialog::Show(this, baseArgs(), name);
+            NamespaceDetailsDialog::Show(this, contextBox_->currentText(), name);
         }
 
         // Writes the new session credentials to ~/.aws/credentials under a profile named

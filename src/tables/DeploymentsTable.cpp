@@ -1,9 +1,10 @@
 #include <tables/DeploymentsTable.h>
 
-#include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/EventBus.h>
 #include <utils/HealthLight.h>
 #include <utils/KubeFormat.h>
+#include <utils/Logging.h>
 
 #include <QElapsedTimer>
 
@@ -43,7 +44,13 @@ DeploymentsTable::DeploymentsTable(QWidget *parent) : KubeTable(parent) {
 void DeploymentsTable::Refresh() {
     QElapsedTimer timer;
     timer.start();
-    const QJsonArray items = KubectlClient::fetchItems(ResourceArgs("deployments"));
+
+    KubeNetService &svc = KubeNetService::forContext(CurrentContext());
+    if (!svc.IsValid()) {
+        logWarning << svc.LastError();
+        return;
+    }
+    const QJsonArray items = svc.fetchItems(KubeNetService::ResourcePath("deployments", CurrentNamespace()));
 
     PopulatePage(items, kHealthColumn, [](const QJsonObject &deployment) { return static_cast<long>(ComputeHealth(deployment)); }, [&](const int row, const QJsonObject &deployment) {
         const QJsonObject metadata = deployment["metadata"].toObject();
