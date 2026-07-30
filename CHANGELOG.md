@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.15](https://github.com/jensvogt/kubewatch/compare/1.3.14...1.3.15) (2026-07-30)
+
+
+### Bug Fixes
+
+* new REST API calls ([b48d2be](https://github.com/jensvogt/kubewatch/commit/b48d2bedde986fc0c19ec9366ddbfea2b74ba8da))
+* new REST API calls ([0c105a5](https://github.com/jensvogt/kubewatch/commit/0c105a5736daa02fba610c0262b883682970c179))
+
 ## [1.3.14](https://github.com/jensvogt/kubewatch/compare/1.3.13...1.3.14) (2026-07-29)
 
 
