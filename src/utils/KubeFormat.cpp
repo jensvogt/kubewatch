@@ -53,6 +53,12 @@ namespace KubeFormat {
                 return static_cast<qint64>(value.chopped(suffix.size()).toDouble() * factor);
             }
         }
+        // DecimalSI can serialize a quantity at milli scale (e.g. a 1.2Gi limit coming
+        // back as "1288490188800m") even for memory, where "m" isn't a real-world unit --
+        // unlike CPU's millicores, this is just how the API server chose to print it.
+        if (value.endsWith('m')) {
+            return static_cast<qint64>(value.chopped(1).toDouble() / 1000.0);
+        }
         bool ok = false;
         const qint64 bytes = value.toLongLong(&ok);
         return ok ? bytes : 0;
@@ -60,6 +66,16 @@ namespace KubeFormat {
 
     QString formatMemoryGiB(qint64 bytes) {
         return QString::number(bytes / (1024.0 * 1024.0 * 1024.0), 'f', 1) + " Gi";
+    }
+
+    QString formatMemoryBytes(qint64 bytes) {
+        constexpr qint64 kKi = 1024LL;
+        constexpr qint64 kMi = kKi * 1024;
+        constexpr qint64 kGi = kMi * 1024;
+        if (bytes >= kGi) return QString::number(bytes / static_cast<double>(kGi), 'f', 1) + " Gi";
+        if (bytes >= kMi) return QString::number(bytes / static_cast<double>(kMi), 'f', 0) + " Mi";
+        if (bytes >= kKi) return QString::number(bytes / static_cast<double>(kKi), 'f', 0) + " Ki";
+        return QString::number(bytes);
     }
 
     bool isTerminatedPodPhase(const QString &phase) {
@@ -77,7 +93,13 @@ namespace KubeFormat {
     QString formatResourceList(const QJsonObject &resourceMap) {
         QStringList parts;
         for (auto it = resourceMap.begin(); it != resourceMap.end(); ++it) {
-            parts << it.key() + ": " + it.value().toString();
+            // "memory" is the one quantity the API server may print at milli scale (see
+            // parseMemoryBytes) -- reformat it so that never leaks through as-is. Other
+            // resources (cpu, ephemeral-storage, custom resources like nvidia.com/gpu)
+            // are already printed in a human-readable unit, so pass them through as-is.
+            const QString value =
+                    it.key() == "memory" ? formatMemoryBytes(parseMemoryBytes(it.value().toString())) : it.value().toString();
+            parts << it.key() + ": " + value;
         }
         return parts.isEmpty() ? "-" : parts.join(", ");
     }
