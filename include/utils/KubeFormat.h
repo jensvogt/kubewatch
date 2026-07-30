@@ -18,10 +18,16 @@ namespace KubeFormat {
 
     QString formatCpuMillis(qint64 millis);
 
-    // Parses a Kubernetes memory quantity ("128Mi", "2Gi", "512k", plain bytes) into bytes.
+    // Parses a Kubernetes memory quantity ("128Mi", "2Gi", "512k", "1288490188800m"
+    // milli-bytes, plain bytes) into bytes.
     qint64 parseMemoryBytes(const QString &value);
 
     QString formatMemoryGiB(qint64 bytes);
+
+    // Formats a byte count using whichever of Ki/Mi/Gi keeps it readable (e.g. "256 Mi",
+    // "1.2 Gi") -- unlike formatMemoryGiB, which always uses Gi and so renders small,
+    // container-scale quantities as an unreadable "0.2 Gi".
+    QString formatMemoryBytes(qint64 bytes);
 
     // Succeeded/Failed pods linger in the API (e.g. completed Job/CronJob pods) without
     // holding any node resources. kubectl describe node's "Non-terminated Pods" summary
