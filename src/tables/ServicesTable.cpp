@@ -1,8 +1,9 @@
 #include <tables/ServicesTable.h>
 
-#include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/EventBus.h>
 #include <utils/KubeFormat.h>
+#include <utils/Logging.h>
 
 #include <QElapsedTimer>
 
@@ -15,7 +16,13 @@ ServicesTable::ServicesTable(QWidget *parent) : KubeTable(parent) {
 void ServicesTable::Refresh() {
     QElapsedTimer timer;
     timer.start();
-    const QJsonArray items = KubectlClient::fetchItems(ResourceArgs("services"));
+
+    KubeNetService &svc = KubeNetService::forContext(CurrentContext());
+    if (!svc.IsValid()) {
+        logWarning << svc.LastError();
+        return;
+    }
+    const QJsonArray items = svc.fetchItems(KubeNetService::ResourcePath("services", CurrentNamespace()));
 
     PopulatePage(items, [&](int row, const QJsonObject &svc) {
         const QJsonObject metadata = svc["metadata"].toObject();

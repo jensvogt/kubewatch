@@ -1,13 +1,13 @@
 #include <dialogs/ReplicaSetDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -43,7 +43,7 @@ namespace {
     }
 } // namespace
 
-void ReplicaSetDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name, const QString &ns) {
+void ReplicaSetDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name, const QString &ns) {
     QJsonObject replicaSet;
     QJsonArray pods;
     QJsonArray services;
@@ -51,14 +51,17 @@ void ReplicaSetDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs,
     {
         BusyGuard busyGuard;
 
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "replicasets" << name << "-n" << ns << "-o" << "json";
-        const KubectlResult result = KubectlClient::runKubectlCommand(getArgs);
-        if (!result.success) {
-            QMessageBox::warning(parent, "ReplicaSet details failed", result.error);
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "ReplicaSet details failed", svc.LastError());
             return;
         }
-        replicaSet = QJsonDocument::fromJson(result.output.toUtf8()).object();
+
+        replicaSet = svc.fetchObject(KubeNetService::ResourcePath("replicasets", ns) + "/" + name);
+        if (replicaSet.isEmpty()) {
+            QMessageBox::warning(parent, "ReplicaSet details failed", svc.LastError());
+            return;
+        }
 
         const QJsonObject matchLabels = replicaSet["spec"].toObject()["selector"].toObject()["matchLabels"].toObject();
         if (!matchLabels.isEmpty()) {
@@ -66,19 +69,12 @@ void ReplicaSetDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs,
             for (auto it = matchLabels.begin(); it != matchLabels.end(); ++it) {
                 selectorParts << it.key() + "=" + it.value().toString();
             }
-            QStringList podArgs = baseArgs;
-            podArgs << "get" << "pods" << "-n" << ns << "-l" << selectorParts.join(",") << "-o" << "json";
-            pods = KubectlClient::fetchItems(podArgs);
+            pods = svc.fetchItems(KubeNetService::ResourcePath("pods", ns) + "?labelSelector=" + selectorParts.join(","));
         }
 
-        QStringList serviceArgs = baseArgs;
-        serviceArgs << "get" << "services" << "-n" << ns << "-o" << "json";
-        services = KubectlClient::fetchItems(serviceArgs);
+        services = svc.fetchItems(KubeNetService::ResourcePath("services", ns));
 
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "-n" << ns << "--field-selector"
-                << "involvedObject.name=" + name + ",involvedObject.kind=ReplicaSet" << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        events = svc.fetchItems(KubeNetService::ResourcePath("events", ns) + "?fieldSelector=involvedObject.name=" + name + ",involvedObject.kind=ReplicaSet");
     }
 
     const QJsonObject metadata = replicaSet["metadata"].toObject();

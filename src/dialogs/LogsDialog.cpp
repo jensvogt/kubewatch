@@ -1,6 +1,7 @@
 #include <dialogs/LogsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/IconUtils.h>
 
 #include <QComboBox>
@@ -9,7 +10,6 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -20,25 +20,39 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
-void LogsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &resource, const QString &name,
+namespace {
+    // GET .../pods/<pod>/log?container=<container>&tailLines=2000[&previous=true] -- plain
+    // text, not JSON, so this goes through fetchRaw rather than fetchItems/fetchObject.
+    QString fetchPodLog(KubeNetService &svc, const QString &ns, const QString &podName, const QString &containerName,
+                         bool previous, QString *error) {
+        QString path = KubeNetService::ResourcePath("pods", ns) + "/" + podName + "/log?container=" + containerName + "&tailLines=2000";
+        if (previous) path += "&previous=true";
+        return QString::fromUtf8(svc.fetchRaw(path, error));
+    }
+} // namespace
+
+void LogsDialog::Show(QWidget *parent, const QString &context, const QString &resource, const QString &name,
                        const QString &ns) {
     QJsonArray pods;
     QString initialLogs;
     {
         BusyGuard busyGuard;
+
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "Logs failed", svc.LastError());
+            return;
+        }
+
         if (resource == "pods") {
-            QStringList getArgs = baseArgs;
-            getArgs << "get" << "pods" << name << "-n" << ns << "-o" << "json";
-            const KubectlResult podResult = KubectlClient::runKubectlCommand(getArgs);
-            if (!podResult.success) {
-                QMessageBox::warning(parent, "Logs failed", podResult.error);
+            const QJsonObject podObj = svc.fetchObject(KubeNetService::ResourcePath("pods", ns) + "/" + name);
+            if (podObj.isEmpty()) {
+                QMessageBox::warning(parent, "Logs failed", svc.LastError());
                 return;
             }
-            pods.append(QJsonDocument::fromJson(podResult.output.toUtf8()).object());
+            pods.append(podObj);
         } else {
-            QStringList podArgs = baseArgs;
-            podArgs << "get" << "pods" << "-n" << ns << "-l" << "job-name=" + name << "-o" << "json";
-            pods = KubectlClient::fetchItems(podArgs);
+            pods = svc.fetchItems(KubeNetService::ResourcePath("pods", ns) + "?labelSelector=job-name=" + name);
         }
         if (pods.isEmpty()) {
             QMessageBox::warning(parent, "Logs failed", "No pods found for " + resource + "/" + name);
@@ -48,11 +62,10 @@ void LogsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QStrin
         const QJsonObject firstPod = pods[0].toObject();
         const QJsonArray firstContainers = firstPod["spec"].toObject()["containers"].toArray();
         if (!firstContainers.isEmpty()) {
-            QStringList logArgs = baseArgs;
-            logArgs << "logs" << firstPod["metadata"].toObject()["name"].toString() << "-n" << ns << "-c"
-                    << firstContainers[0].toObject()["name"].toString() << "--tail=2000";
-            const KubectlResult logResult = KubectlClient::runKubectlCommand(logArgs);
-            initialLogs = logResult.success ? logResult.output : "Failed to fetch logs: " + logResult.error;
+            QString error;
+            initialLogs = fetchPodLog(svc, ns, firstPod["metadata"].toObject()["name"].toString(),
+                                       firstContainers[0].toObject()["name"].toString(), false, &error);
+            if (!error.isEmpty()) initialLogs = "Failed to fetch logs: " + error;
         }
     }
 
@@ -126,15 +139,13 @@ void LogsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QStrin
         }
     };
 
-    auto fetchLogs = [baseArgs, podBox, containerBox, previousButton, ns, setLogText] {
+    auto fetchLogs = [context, podBox, containerBox, previousButton, ns, setLogText] {
         if (containerBox->currentText().isEmpty()) return;
         BusyGuard busyGuard;
-        QStringList logArgs = baseArgs;
-        logArgs << "logs" << podBox->currentText() << "-n" << ns << "-c" << containerBox->currentText()
-                << "--tail=2000";
-        if (previousButton->isChecked()) logArgs << "--previous";
-        const KubectlResult logResult = KubectlClient::runKubectlCommand(logArgs);
-        setLogText(logResult.success ? logResult.output : "Failed to fetch logs: " + logResult.error);
+        QString error;
+        const QString logText = fetchPodLog(KubeNetService::forContext(context), ns, podBox->currentText(),
+                                             containerBox->currentText(), previousButton->isChecked(), &error);
+        setLogText(error.isEmpty() ? logText : "Failed to fetch logs: " + error);
     };
 
     QObject::connect(podBox, &QComboBox::currentIndexChanged, &dialog, [updateContainers, fetchLogs](int) {

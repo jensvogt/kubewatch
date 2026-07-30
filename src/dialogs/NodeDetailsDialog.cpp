@@ -1,6 +1,7 @@
 #include <dialogs/NodeDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QDialog>
@@ -8,7 +9,6 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -84,35 +84,34 @@ namespace {
     }
 } // namespace
 
-void NodeDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name) {
+void NodeDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name) {
     QJsonObject node;
     QJsonArray pods;
     QJsonArray events;
     {
         BusyGuard busyGuard;
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "nodes" << name << "-o" << "json";
-        const KubectlResult nodeResult = KubectlClient::runKubectlCommand(getArgs);
-        if (!nodeResult.success) {
-            QMessageBox::warning(parent, "Node details failed", nodeResult.error);
+
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "Node details failed", svc.LastError());
             return;
         }
-        node = QJsonDocument::fromJson(nodeResult.output.toUtf8()).object();
 
-        QStringList podArgs = baseArgs;
-        podArgs << "get" << "pods" << "--all-namespaces" << "--field-selector" << "spec.nodeName=" + name << "-o" << "json";
+        node = svc.fetchObject(KubeNetService::ResourcePath("nodes") + "/" + name);
+        if (node.isEmpty()) {
+            QMessageBox::warning(parent, "Node details failed", svc.LastError());
+            return;
+        }
+
         // Excludes Succeeded/Failed pods (e.g. completed Job pods still lingering
         // on the node) to match kubectl describe node / the Kubernetes Dashboard.
-        for (const auto &podValue: KubectlClient::fetchItems(podArgs)) {
+        for (const auto &podValue: svc.fetchItems(KubeNetService::ResourcePath("pods") + "?fieldSelector=spec.nodeName=" + name)) {
             if (!KubeFormat::isTerminatedPodPhase(podValue.toObject()["status"].toObject()["phase"].toString())) {
                 pods.append(podValue);
             }
         }
 
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "--all-namespaces" << "--field-selector"
-                  << "involvedObject.name=" + name + ",involvedObject.kind=Node" << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        events = svc.fetchItems(KubeNetService::ResourcePath("events") + "?fieldSelector=involvedObject.name=" + name + ",involvedObject.kind=Node");
     }
 
     const QJsonObject metadata = node["metadata"].toObject();

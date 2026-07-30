@@ -1,9 +1,10 @@
 #include <tables/EventsTable.h>
 
-#include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/EventBus.h>
 #include <utils/HealthLight.h>
 #include <utils/KubeFormat.h>
+#include <utils/Logging.h>
 
 #include <QElapsedTimer>
 
@@ -22,7 +23,13 @@ EventsTable::EventsTable(QWidget *parent) : KubeTable(parent) {
 void EventsTable::Refresh() {
     QElapsedTimer timer;
     timer.start();
-    const QJsonArray items = KubectlClient::fetchItems(ResourceArgs("events"));
+
+    KubeNetService &svc = KubeNetService::forContext(CurrentContext());
+    if (!svc.IsValid()) {
+        logWarning << svc.LastError();
+        return;
+    }
+    const QJsonArray items = svc.fetchItems(KubeNetService::ResourcePath("events", CurrentNamespace()));
 
     const auto healthOf = [](const QJsonObject &event) {
         return static_cast<long>(event["type"].toString() == "Warning" ? Health::Warning : Health::Ok);

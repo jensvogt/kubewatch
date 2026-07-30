@@ -1,13 +1,13 @@
 #include <dialogs/DeploymentDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -52,7 +52,7 @@ namespace {
     }
 } // namespace
 
-void DeploymentDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name, const QString &ns) {
+void DeploymentDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name, const QString &ns) {
     QJsonObject deployment;
     QJsonArray replicaSets;
     QJsonArray horizontalPodAutoscalers;
@@ -60,27 +60,23 @@ void DeploymentDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs,
     {
         BusyGuard busyGuard;
 
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "deployments" << name << "-n" << ns << "-o" << "json";
-        const KubectlResult result = KubectlClient::runKubectlCommand(getArgs);
-        if (!result.success) {
-            QMessageBox::warning(parent, "Deployment details failed", result.error);
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "Deployment details failed", svc.LastError());
             return;
         }
-        deployment = QJsonDocument::fromJson(result.output.toUtf8()).object();
 
-        QStringList replicaSetArgs = baseArgs;
-        replicaSetArgs << "get" << "replicasets" << "-n" << ns << "-o" << "json";
-        replicaSets = KubectlClient::fetchItems(replicaSetArgs);
+        deployment = svc.fetchObject(KubeNetService::ResourcePath("deployments", ns) + "/" + name);
+        if (deployment.isEmpty()) {
+            QMessageBox::warning(parent, "Deployment details failed", svc.LastError());
+            return;
+        }
 
-        QStringList hpaArgs = baseArgs;
-        hpaArgs << "get" << "horizontalpodautoscalers" << "-n" << ns << "-o" << "json";
-        horizontalPodAutoscalers = KubectlClient::fetchItems(hpaArgs);
+        replicaSets = svc.fetchItems(KubeNetService::ResourcePath("replicasets", ns));
 
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "-n" << ns << "--field-selector"
-                << "involvedObject.name=" + name + ",involvedObject.kind=Deployment" << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        horizontalPodAutoscalers = svc.fetchItems(KubeNetService::ResourcePath("horizontalpodautoscalers", ns));
+
+        events = svc.fetchItems(KubeNetService::ResourcePath("events", ns) + "?fieldSelector=involvedObject.name=" + name + ",involvedObject.kind=Deployment");
     }
 
     const QJsonObject metadata = deployment["metadata"].toObject();

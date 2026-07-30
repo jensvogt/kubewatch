@@ -1,13 +1,13 @@
 #include <dialogs/DaemonSetDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -43,7 +43,7 @@ namespace {
     }
 } // namespace
 
-void DaemonSetDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name, const QString &ns) {
+void DaemonSetDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name, const QString &ns) {
     QJsonObject daemonSet;
     QJsonArray pods;
     QJsonArray services;
@@ -51,14 +51,17 @@ void DaemonSetDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, 
     {
         BusyGuard busyGuard;
 
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "daemonsets" << name << "-n" << ns << "-o" << "json";
-        const KubectlResult result = KubectlClient::runKubectlCommand(getArgs);
-        if (!result.success) {
-            QMessageBox::warning(parent, "DaemonSet details failed", result.error);
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "DaemonSet details failed", svc.LastError());
             return;
         }
-        daemonSet = QJsonDocument::fromJson(result.output.toUtf8()).object();
+
+        daemonSet = svc.fetchObject(KubeNetService::ResourcePath("daemonsets", ns) + "/" + name);
+        if (daemonSet.isEmpty()) {
+            QMessageBox::warning(parent, "DaemonSet details failed", svc.LastError());
+            return;
+        }
 
         const QJsonObject matchLabels = daemonSet["spec"].toObject()["selector"].toObject()["matchLabels"].toObject();
         if (!matchLabels.isEmpty()) {
@@ -66,19 +69,12 @@ void DaemonSetDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, 
             for (auto it = matchLabels.begin(); it != matchLabels.end(); ++it) {
                 selectorParts << it.key() + "=" + it.value().toString();
             }
-            QStringList podArgs = baseArgs;
-            podArgs << "get" << "pods" << "-n" << ns << "-l" << selectorParts.join(",") << "-o" << "json";
-            pods = KubectlClient::fetchItems(podArgs);
+            pods = svc.fetchItems(KubeNetService::ResourcePath("pods", ns) + "?labelSelector=" + selectorParts.join(","));
         }
 
-        QStringList serviceArgs = baseArgs;
-        serviceArgs << "get" << "services" << "-n" << ns << "-o" << "json";
-        services = KubectlClient::fetchItems(serviceArgs);
+        services = svc.fetchItems(KubeNetService::ResourcePath("services", ns));
 
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "-n" << ns << "--field-selector"
-                << "involvedObject.name=" + name + ",involvedObject.kind=DaemonSet" << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        events = svc.fetchItems(KubeNetService::ResourcePath("events", ns) + "?fieldSelector=involvedObject.name=" + name + ",involvedObject.kind=DaemonSet");
     }
 
     const QJsonObject metadata = daemonSet["metadata"].toObject();

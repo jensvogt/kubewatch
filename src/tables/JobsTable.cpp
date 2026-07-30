@@ -1,9 +1,10 @@
 #include <tables/JobsTable.h>
 
-#include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/EventBus.h>
 #include <utils/HealthLight.h>
 #include <utils/KubeFormat.h>
+#include <utils/Logging.h>
 
 #include <QElapsedTimer>
 
@@ -60,7 +61,13 @@ JobsTable::JobsTable(QWidget *parent) : KubeTable(parent) {
 void JobsTable::Refresh() {
     QElapsedTimer timer;
     timer.start();
-    const QJsonArray items = KubectlClient::fetchItems(ResourceArgs("jobs"));
+
+    KubeNetService &svc = KubeNetService::forContext(CurrentContext());
+    if (!svc.IsValid()) {
+        logWarning << svc.LastError();
+        return;
+    }
+    const QJsonArray items = svc.fetchItems(KubeNetService::ResourcePath("jobs", CurrentNamespace()));
 
     PopulatePage(items, kHealthColumn, [](const QJsonObject &job) { return static_cast<long>(ComputeHealth(job)); }, [&](int row, const QJsonObject &job) {
         const QJsonObject metadata = job["metadata"].toObject();

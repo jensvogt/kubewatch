@@ -1,13 +1,13 @@
 #include <dialogs/PodDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -131,37 +131,35 @@ namespace {
     }
 } // namespace
 
-void PodDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name, const QString &ns) {
+void PodDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name, const QString &ns) {
     QJsonObject pod;
     QJsonArray events;
     QString ownerKind;
     QString ownerName;
-    KubectlResult ownerResult;
+    QJsonObject ownerObj;
     {
         BusyGuard busyGuard;
 
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "pods" << name << "-n" << ns << "-o" << "json";
-        const auto [success, output, error] = KubectlClient::runKubectlCommand(getArgs);
-        if (!success) {
-            QMessageBox::warning(parent, "Pod details failed", error);
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "Pod details failed", svc.LastError());
             return;
         }
-        pod = QJsonDocument::fromJson(output.toUtf8()).object();
 
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "-n" << ns << "--field-selector"
-                << "involvedObject.name=" + name + ",involvedObject.kind=Pod" << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        pod = svc.fetchObject(KubeNetService::ResourcePath("pods", ns) + "/" + name);
+        if (pod.isEmpty()) {
+            QMessageBox::warning(parent, "Pod details failed", svc.LastError());
+            return;
+        }
+
+        events = svc.fetchItems(KubeNetService::ResourcePath("events", ns) + "?fieldSelector=involvedObject.name=" + name + ",involvedObject.kind=Pod");
 
         if (const QJsonArray ownerReferences = pod["metadata"].toObject()["ownerReferences"].toArray(); !ownerReferences.isEmpty()) {
             const QJsonObject owner = ownerReferences[0].toObject();
             ownerKind = owner["kind"].toString();
             ownerName = owner["name"].toString();
 
-            QStringList ownerArgs = baseArgs;
-            ownerArgs << "get" << (ownerKind.toLower() + "s") << ownerName << "-n" << ns << "-o" << "json";
-            ownerResult = KubectlClient::runKubectlCommand(ownerArgs);
+            ownerObj = svc.fetchObject(KubeNetService::ResourcePath(ownerKind.toLower() + "s", ns) + "/" + ownerName);
         }
     }
 
@@ -237,8 +235,7 @@ void PodDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const 
         ownerForm->addRow("Name", new QLabel(ownerName));
         ownerForm->addRow("Kind", new QLabel(ownerKind));
 
-        if (ownerResult.success) {
-            const QJsonObject ownerObj = QJsonDocument::fromJson(ownerResult.output.toUtf8()).object();
+        if (!ownerObj.isEmpty()) {
             const QJsonObject ownerMeta = ownerObj["metadata"].toObject();
             const QJsonObject ownerStatus = ownerObj["status"].toObject();
             const QJsonObject ownerSpec = ownerObj["spec"].toObject();

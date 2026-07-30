@@ -1,6 +1,7 @@
 #include <dialogs/IngressDetailsDialog.h>
 
 #include <kubectl/KubectlClient.h>
+#include <kubectl/KubeNetService.h>
 #include <utils/KubeFormat.h>
 
 #include <QDialog>
@@ -8,7 +9,6 @@
 #include <QGroupBox>
 #include <QHash>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -16,24 +16,25 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
-void IngressDetailsDialog::Show(QWidget *parent, const QStringList &baseArgs, const QString &name, const QString &ns) {
+void IngressDetailsDialog::Show(QWidget *parent, const QString &context, const QString &name, const QString &ns) {
     QJsonObject ingress;
     QJsonArray events;
     {
         BusyGuard busyGuard;
-        QStringList getArgs = baseArgs;
-        getArgs << "get" << "ingresses" << name << "-n" << ns << "-o" << "json";
-        const KubectlResult ingressResult = KubectlClient::runKubectlCommand(getArgs);
-        if (!ingressResult.success) {
-            QMessageBox::warning(parent, "Ingress details failed", ingressResult.error);
+
+        KubeNetService &svc = KubeNetService::forContext(context);
+        if (!svc.IsValid()) {
+            QMessageBox::warning(parent, "Ingress details failed", svc.LastError());
             return;
         }
-        ingress = QJsonDocument::fromJson(ingressResult.output.toUtf8()).object();
 
-        QStringList eventArgs = baseArgs;
-        eventArgs << "get" << "events" << "-n" << ns << "--field-selector"
-                  << "involvedObject.name=" + name + ",involvedObject.kind=Ingress" << "-o" << "json";
-        events = KubectlClient::fetchItems(eventArgs);
+        ingress = svc.fetchObject(KubeNetService::ResourcePath("ingresses", ns) + "/" + name);
+        if (ingress.isEmpty()) {
+            QMessageBox::warning(parent, "Ingress details failed", svc.LastError());
+            return;
+        }
+
+        events = svc.fetchItems(KubeNetService::ResourcePath("events", ns) + "?fieldSelector=involvedObject.name=" + name + ",involvedObject.kind=Ingress");
     }
 
     const QJsonObject metadata = ingress["metadata"].toObject();

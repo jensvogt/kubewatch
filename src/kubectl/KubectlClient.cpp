@@ -166,6 +166,37 @@ namespace KubectlClient {
     QJsonArray fetchItems(const QStringList &args) {
         return QJsonDocument::fromJson(runKubectl(args).toUtf8()).object().value("items").toArray();
     }
+
+    QString GetBearerToken(const QString &clusterName, QString *error) {
+        const auto setError = [error](const QString &message) {
+            if (error) *error = message;
+        };
+
+        QProcess process;
+        if (g_activeAwsCredentials.isValid()) {
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            env.insert("AWS_ACCESS_KEY_ID", g_activeAwsCredentials.accessKeyId);
+            env.insert("AWS_SECRET_ACCESS_KEY", g_activeAwsCredentials.secretAccessKey);
+            env.insert("AWS_SESSION_TOKEN", g_activeAwsCredentials.sessionToken);
+            process.setProcessEnvironment(env);
+        }
+        process.start("aws", {"eks", "get-token", "--cluster-name", clusterName, "--output", "json"});
+        if (!process.waitForFinished(30000)) {
+            setError("aws eks get-token timed out.");
+            return {};
+        }
+        if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+            setError("aws eks get-token failed: " + QString::fromLocal8Bit(process.readAllStandardError()));
+            return {};
+        }
+
+        const QJsonObject execCredential = QJsonDocument::fromJson(process.readAllStandardOutput()).object();
+        const QString token = execCredential["status"].toObject()["token"].toString();
+        if (token.isEmpty()) {
+            setError("aws eks get-token returned no token.");
+        }
+        return token;
+    }
 } // namespace KubectlClient
 
 BusyGuard::BusyGuard() {

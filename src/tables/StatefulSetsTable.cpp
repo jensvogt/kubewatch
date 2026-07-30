@@ -1,4 +1,4 @@
-#include <tables/GenericTable.h>
+#include <tables/StatefulSetsTable.h>
 
 #include <kubectl/KubeNetService.h>
 #include <utils/EventBus.h>
@@ -7,13 +7,13 @@
 
 #include <QElapsedTimer>
 
-GenericTable::GenericTable(QString resource, QWidget *parent) : KubeTable(parent), resource_(std::move(resource)) {
+StatefulSetsTable::StatefulSetsTable(QWidget *parent) : KubeTable(parent) {
     ConfigureHeaders({"Name", "Age", "Namespace"});
     SetHiddenColumns({kNamespaceColumn});
-    setServiceApis({resource_});
+    setServiceApis({"statefulsets"});
 }
 
-void GenericTable::Refresh() {
+void StatefulSetsTable::Refresh() {
     QElapsedTimer timer;
     timer.start();
 
@@ -22,13 +22,13 @@ void GenericTable::Refresh() {
         logWarning << svc.LastError();
         return;
     }
-    const QJsonArray items = svc.fetchItems(KubeNetService::ResourcePath(resource_, CurrentNamespace()));
+    const QJsonArray items = svc.fetchItems(KubeNetService::ResourcePath("statefulsets", CurrentNamespace()));
 
-    PopulatePage(items, [&](int row, const QJsonObject &obj) {
+    PopulatePage(items, [&](const int row, const QJsonObject &obj) {
         const QJsonObject metadata = obj["metadata"].toObject();
         SetColumn(row, 0, metadata["name"].toString());
         SetColumn(row, 1, KubeFormat::computeAge(metadata["creationTimestamp"].toString()));
         SetHiddenColumn(row, kNamespaceColumn, metadata["namespace"].toString());
     });
-    EventBus::instance().TimerSignal(resource_, timer.elapsed());
+    EventBus::instance().TimerSignal("statefulsets", timer.elapsed());
 }
